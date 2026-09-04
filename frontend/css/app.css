@@ -1,0 +1,40 @@
+/* CONNECT · Sapawoo design tokens (light + forest-dark) */
+:root{
+  --sw-bg:#F3EFE6; --sw-card:#FBF7EE; --sw-sidebar:#28332C; --sw-ink:#1F2823;
+  --sw-ink2:#3D4A41; --sw-ink3:#6B7771; --sw-line:#DCD4C3; --sw-acc:#B8643F;
+  --sw-acc-soft:#F2DCC9; --sw-info:#2F6F58; --sw-warn:#B8843F; --sw-danger:#A8463F; --sw-good:#2F8758;
+}
+.forest-dark{
+  --sw-bg:#142A24; --sw-card:#234740; --sw-sidebar:#102220; --sw-ink:#EBE2CF;
+  --sw-ink2:#C0C9BE; --sw-ink3:#8C9A8F; --sw-line:rgba(233,224,205,.12);
+  --sw-acc:#C5825A; --sw-acc-soft:rgba(197,130,90,.16);
+}
+body{background:var(--sw-bg);color:var(--sw-ink);font-family:'DM Sans',system-ui,sans-serif}
+.sb{background:var(--sw-sidebar);color:#E8E1CF;min-height:100vh;width:232px;position:fixed;top:0;left:0;bottom:0;z-index:100;padding:18px 14px;display:flex;flex-direction:column;gap:14px}
+.sb .logo{font-family:Georgia,serif;font-size:26px;letter-spacing:.08em;border-bottom:1px solid rgba(232,225,207,.12);padding-bottom:12px}
+.sb .logo small{display:block;font-size:9px;letter-spacing:.3em;color:#8FA194}
+.nav-sec{font-size:9px;letter-spacing:.22em;color:#8FA194;text-transform:uppercase;padding:8px 6px 2px}
+.ni{display:flex;gap:10px;align-items:center;padding:8px 10px;border-radius:8px;font-size:13px;color:#E8E1CF;opacity:.8;cursor:pointer;border:0;background:transparent;width:100%;text-align:left}
+.ni.active,.ni:hover{background:var(--sw-acc);opacity:1;color:#fff}
+.main{margin-left:232px;min-height:100vh}
+.tb{height:56px;display:flex;align-items:center;justify-content:space-between;padding:0 24px;border-bottom:1px solid var(--sw-line);position:sticky;top:0;background:var(--sw-bg);z-index:50}
+.card-sw{background:var(--sw-card);border:1px solid var(--sw-line);border-radius:16px;padding:20px}
+.pill{display:inline-flex;padding:3px 10px;border-radius:999px;font-size:10px;font-weight:700;letter-spacing:.12em;text-transform:uppercase}
+.p-on{background:#F4E4C8;color:#8E6322}.p-act{background:#D2E7DA;color:#2F8758}.p-pend{background:#EFD3CF;color:#A8463F}
+.p-info{background:#D8E6DD;color:#2F6F58}.p-acc{background:var(--sw-acc-soft);color:var(--sw-acc)}
+.mono{font-family:'JetBrains Mono',monospace}
+.support-banner{background:#A8463F;color:#fff;padding:8px 16px;font-size:13px;display:none}
+.support-banner.show{display:block}
+.qrbox{width:180px;height:180px;background:#fff;border:1px solid var(--sw-line);border-radius:12px;display:flex;align-items:center;justify-content:center;font-family:monospace;font-size:11px;text-align:center;padding:8px;color:#111}
+.kpi{font-size:26px;font-weight:600}
+.grid-kpi{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px}
+table.tbl{width:100%;font-size:13px} table.tbl th{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--sw-ink3);text-align:left;padding:8px;border-bottom:1px solid var(--sw-line)}
+table.tbl td{padding:9px 8px;border-bottom:1px solid var(--sw-line)}
+@media(max-width:900px){.sb{transform:translateX(-100%)}.sb.open{transform:none}.main{margin-left:0}}
+.voucher-print{background:#fff;color:#111;border-radius:16px;padding:20px}
+/* microsite hero */
+.ms-hero{background:linear-gradient(135deg,#1D3C34,#2a5247);color:#F3EFE6;border-radius:18px;padding:28px}
+.svc-img{height:110px;border-radius:12px;background:linear-gradient(135deg,#E9DEC4,#C3D2B7);display:flex;align-items:center;justify-content:center;font-size:12px;color:#555}
+@media(max-width:900px){.sb{transform:translateX(-100%);transition:transform .2s}.sb.open{transform:none}.main{margin-left:0}.tb{padding:0 12px}.card-sw{padding:14px;border-radius:12px}}
+.qrbox img{max-width:100%}
+@media print{.sb,.tb,#btn-out,#btn-lang,#btn-dark{display:none}.main{margin-left:0}.voucher-print{border:1px solid #000}}
