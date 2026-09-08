@@ -65,7 +65,17 @@
   ],
   "invites": [],
   "resets": [],
-  "sessions": [],
+  "sessions": [
+    {
+      "token": "170bab0b236e193396cdccae047c4ff45eaa251dad3893ea",
+      "userId": "u_tenant",
+      "role": "tenant_admin",
+      "scope": "tenant",
+      "support": false,
+      "supportReason": "",
+      "ts": "2026-09-08T07:15:05.909Z"
+    }
+  ],
   "partners": [
     {
       "id": "p_saigon",
@@ -277,7 +287,32 @@
     "hero_en": "Exclusive member benefit via our partner",
     "hero_vi": "Ưu đãi độc quyền qua đối tác"
   },
-  "vouchers": [],
+  "vouchers": [
+    {
+      "id": "v_7aa77d3a4iuh",
+      "code": "V-9C68BF",
+      "ref": "9C68BF",
+      "mediaId": "m_co",
+      "attribution": {
+        "company": "p_saigon",
+        "location": null,
+        "affiliated": null,
+        "medium": "m_co"
+      },
+      "snapshot": {
+        "discountPct": 10,
+        "companyComm": 10,
+        "indivShare": 4,
+        "total": 20,
+        "budgetId": "b_1"
+      },
+      "status": "active",
+      "activatedAt": "2026-09-08T07:15:17.225Z",
+      "expiresAt": "2026-09-15T07:15:17.225Z",
+      "deviceId": "dev_fcypxo5",
+      "contactPrefill": "Voucher 9C68BF · 10% · exp 2026-09-15T07:15:17.225Z"
+    }
+  ],
   "redemptions": [],
   "payouts": [
     {
@@ -338,9 +373,38 @@
       "scope": "tenant",
       "internal": true,
       "note": ""
+    },
+    {
+      "id": "a_f87ab45e4a45",
+      "ts": "2026-09-08T07:15:05.909Z",
+      "actor": "u_tenant",
+      "action": "signin",
+      "prev": "",
+      "next": "tenant_admin/tenant",
+      "scope": "tenant",
+      "internal": true,
+      "note": ""
+    },
+    {
+      "id": "a_cee298ec4iuh",
+      "ts": "2026-09-08T07:15:17.225Z",
+      "actor": "anonymous",
+      "action": "voucher_activate",
+      "prev": "",
+      "next": "9C68BF",
+      "scope": "p_saigon",
+      "internal": false,
+      "note": ""
     }
   ],
-  "events": [],
+  "events": [
+    {
+      "k": "open",
+      "code": "SAPAWO-CO-SAIGON",
+      "at": "2026-09-08T07:15:17.225Z",
+      "dev": "dev_fcypxo5"
+    }
+  ],
   "settings": {
     "vat": 8,
     "lang": "en",

@@ -10,7 +10,7 @@ const crypto = require('crypto');
 
 const PORT = process.env.PORT || 3000;
 const DATA_FILE = path.join(__dirname, 'data.json');
-const FRONT_DIR = path.join(__dirname, '..', 'frontend');
+const FRONT_DIR = path.join(__dirname, 'view');
 
 const app = express();
 app.use(cors());
