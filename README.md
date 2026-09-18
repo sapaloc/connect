@@ -1,6 +1,8 @@
 # Connect — total solution
 Node.js + Express + file NoSQL (`data.json`). Serves API + frontend statically.
 - `view/` — Internal Console / MyConnect / Counter / Microsite (jQuery + Bootstrap). Works standalone (localStorage demo) or connected to backend (same-origin `/api/*`, badge `API ● connected`).
+- `src/` — modular backend: `config`, `utils`, `db/` (seed, file store, finance), `auth/` (policy, sessions, RBAC), `routes/` (one module per domain), `app.js` (wiring). Entry: `server.js`.
+- `server.js` — slim boot entry (`npm start`).
 
 
 ## Quick start (total solution)
@@ -51,3 +53,19 @@ Demo logins: `tenant@sapawoo.vn / admin123`, `manager@number160.vn / staff123`, 
 
 Auth: `Authorization: Bearer <token>`. Rate limit 5/5min, 8h session expiry.
 Demo logins: `tenant@sapawoo.vn/admin123`, `manager@number160.vn/staff123`, `partner@company.vn/partner123`.
+
+## Railway deployment
+
+Railway auto-detects Node (Nixpacks). This repo ships `railway.toml` + `Procfile` + `.nvmrc`:
+
+1. Push to GitHub, **New Project → Deploy from Repo** in Railway.
+2. No build config needed — defaults work: install via `npm install`, start via `npm start`, healthcheck `GET /api/health`.
+3. Railway injects `PORT` automatically (already honored via `src/config.js`); the app binds `0.0.0.0`.
+
+**Persistence:** Railway's filesystem is ephemeral — `data.json` reseeds on each redeploy unless you attach a volume:
+
+1. Railway service → **Volumes → Add Volume**, mount path `/data`.
+2. Set env var `DATA_FILE=/data/data.json` (or `DATA_DIR=/data`).
+3. Redeploy — the store is created/loaded at that path from then on.
+
+Useful env vars: `PORT` (auto), `HOST` (default `0.0.0.0`), `DATA_FILE`, `DATA_DIR`, `FRONT_DIR`, `JSON_LIMIT`.

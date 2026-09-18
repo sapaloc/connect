@@ -1,0 +1,55 @@
+'use strict';
+/* Seed data — single source of truth for a fresh file-NoSQL store. */
+const { vnNow, uid } = require('../utils');
+
+function seedDb() {
+  return {
+    users: [
+      { id: 'u_platform', email: 'platform@sapawoo.vn', pass: 'admin123', name: 'Platform Admin', roles: ['platform_admin'], active: true },
+      { id: 'u_tenant', email: 'tenant@sapawoo.vn', pass: 'admin123', name: 'Tenant Admin', roles: ['tenant_admin'], active: true },
+      { id: 'u_mgr', email: 'manager@number160.vn', pass: 'staff123', name: 'Number160 Manager', roles: ['manager160'], active: true },
+      { id: 'u_staff', email: 'staff@number160.vn', pass: 'staff123', name: 'Number160 Staff', roles: ['staff160'], active: true },
+      { id: 'u_partner', email: 'partner@company.vn', pass: 'partner123', name: 'Partner Admin (Saigon Eats)', roles: ['partner_admin'], partnerId: 'p_saigon', active: true },
+      { id: 'u_ref', email: 'referrer@company.vn', pass: 'ref123', name: 'An Nguyen (Referrer)', roles: ['referrer'], referrerId: 'r_an', active: true }
+    ],
+    invites: [], resets: [], sessions: [],
+    partners: [
+      { id: 'p_saigon', kind: 'company', name: 'Saigon Eats Co.', ptype: 'Hotel', owner: 'u_tenant', contact: 'Linh Tran', email: 'hello@saigoneats.vn', phone: '0901234567', status: 'active', approver: 'u_tenant', approvedAt: vnNow(), validFrom: '2026-01-01', validTo: '2027-01-01', note: 'Pilot partner' },
+      { id: 'p_ind1', kind: 'individual', name: 'Independent: Minh Chau', ptype: 'independent', owner: 'u_tenant', contact: 'Minh Chau', email: '', phone: '0912345678', status: 'active', approver: 'u_tenant', approvedAt: vnNow(), validFrom: '2026-02-01', validTo: '', note: '' }
+    ],
+    locations: [{ id: 'l_1', partnerId: 'p_saigon', name: 'Saigon Eats D1', address: '160 Dong Khoi', ward: 'Ben Nghe, D1', referrerId: 'r_an' }],
+    referrers: [
+      { id: 'r_an', kind: 'affiliated', name: 'An Nguyen', rtype: 'Concierge', affiliation: 'employed', partnerId: 'p_saigon', locationId: 'l_1', owner: 'u_tenant', email: '', phone: '0909998888', position: 'Concierge (role, not location)', status: 'approved', note: '' },
+      { id: 'r_ind1', kind: 'independent', name: 'Minh Chau', rtype: 'KOL', affiliation: 'independent', partnerId: 'p_ind1', owner: 'u_tenant', status: 'approved', phone: '0912345678' }
+    ],
+    budgets: [
+      { id: 'b_1', scopeId: 'p_saigon', total: 20, discount: 10, companyComm: 10, indivShare: 4, companyNet: 6, by: 'u_tenant', at: vnNow(), futureOnly: true },
+      { id: 'b_2', scopeId: 'p_ind1', total: 20, discount: 10, indivComm: 10, by: 'u_tenant', at: vnNow(), futureOnly: true }
+    ],
+    media: [
+      { id: 'm_co', kind: 'company', partnerId: 'p_saigon', code: 'SAPAWO-CO-SAIGON', active: true, revoked: false },
+      { id: 'm_loc', kind: 'location', partnerId: 'p_saigon', locationId: 'l_1', code: 'SAPAWO-LOC-D1', active: true, revoked: false },
+      { id: 'm_an', kind: 'personal', partnerId: 'p_saigon', referrerId: 'r_an', code: 'SAPAWO-AN-88', active: true, revoked: false }
+    ],
+    cards: [{ id: 'c_1', partnerId: 'p_saigon', referrerId: 'r_an', status: 'delivered', funding: 'free', requester: 'u_partner', approver: 'u_tenant', history: [{ s: 'requested', at: vnNow(), by: 'u_partner' }, { s: 'approved', at: vnNow(), by: 'u_tenant' }, { s: 'delivered', at: vnNow(), by: 'u_tenant' }] }],
+    services: [
+      { id: 's1', en: 'Signature Body Massage 60m', vi: 'Massage body đặc trưng 60p', dur: 60, price: 850000, img: '', hl: true },
+      { id: 's2', en: 'Deep Tissue 90m', vi: 'Massage sâu 90p', dur: 90, price: 1200000, img: '', hl: true },
+      { id: 's3', en: 'Facial Glow 60m', vi: 'Chăm sóc da 60p', dur: 60, price: 950000, img: '', hl: true },
+      { id: 's4', en: 'Foot Ritual 45p', vi: 'Liệu trình chân 45p', dur: 45, price: 550000, img: '', hl: true },
+      { id: 's5', en: 'Hot Stone 75m', vi: 'Đá nóng 75p', dur: 75, price: 1100000, img: '', hl: false }
+    ],
+    site: { logo: '', zalo: '0901600160', whatsapp: '+84901600160', trust_en: 'Licensed therapists · Hygienic · Since 2016', trust_vi: 'KTV chuyên nghiệp · Vệ sinh · Từ 2016', loc_en: '160 Dong Khoi, D1, HCMC', loc_vi: '160 Đồng Khởi, Q1, TP.HCM', published: true, hero_en: 'Exclusive member benefit via our partner', hero_vi: 'Ưu đãi độc quyền qua đối tác' },
+    vouchers: [], redemptions: [],
+    payouts: [
+      { id: 'po_co', ownerType: 'company', ownerId: 'p_saigon', bank: 'Vietcombank', account: '0071001234567', beneficiary: 'SAIGON EATS CO', qr: '', verified: 'verified', by: 'u_tenant', at: vnNow() },
+      { id: 'po_an', ownerType: 'affiliated', ownerId: 'r_an', bank: 'Techcombank', account: '19012345678', beneficiary: 'NGUYEN VAN AN', qr: '', verified: 'verified', by: 'u_partner', at: vnNow() }
+    ],
+    settlements: [],
+    audits: [{ id: uid('a'), ts: vnNow(), actor: 'system', action: 'seed', prev: '', next: 'db init', scope: 'tenant', internal: true }],
+    events: [],
+    settings: { vat: 8, lang: 'en', supportReason: '' }
+  };
+}
+
+module.exports = { seedDb };
