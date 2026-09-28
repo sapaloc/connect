@@ -7,6 +7,7 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js",
+    "check:syntax": "git ls-files '*.js' '*.mjs' | xargs -n1 node --check",
     "health": "node -e \"fetch('http://localhost:'+(process.env.PORT||3000)+'/api/health').then(r=>r.json()).then(j=>console.log(j)).catch(e=>{console.error(e.message);process.exit(1)})\""
   },
   "dependencies": {

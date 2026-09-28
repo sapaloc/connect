@@ -1,0 +1,29 @@
+name: Branch guard
+
+on:
+  pull_request:
+    branches: [uat, master]
+
+permissions:
+  contents: read
+
+jobs:
+  guard:
+    name: guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Check source branch
+        env:
+          BASE: ${{ github.base_ref }}
+          HEAD: ${{ github.head_ref }}
+        run: |
+          if [ "$BASE" = "uat" ] && [ "$HEAD" != "develop" ] && [[ "$HEAD" != hotfix/* ]]; then
+            echo "::error::uat only accepts PRs from develop or hotfix/* (got $HEAD)"
+            exit 1
+          fi
+          if [ "$BASE" = "master" ] && [ "$HEAD" != "uat" ]; then
+            echo "::error::master only accepts PRs from uat (got $HEAD)"
+            exit 1
+          fi
+          echo "OK: $HEAD -> $BASE"
