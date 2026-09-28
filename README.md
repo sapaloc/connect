@@ -29,12 +29,13 @@ Health check: `GET /api/v1/health`.
 ## Accounts
 
 ```bash
-pnpm seed                 # local/test only: Platform Admin, Tenant Admin, Manager, Staff, multi-role user
-                          # (emails in apps/api/src/db/seed-local.js, password = SEED_PASSWORD in .env)
+pnpm seed                 # local/test/uat (refused on production): Platform Admin, Tenant Admin, Manager, Staff,
+                          # multi-role user (emails in apps/api/src/db/seed-local.js, password = SEED_PASSWORD)
 DATABASE_URL=<uat pooler url> pnpm user:create --email a@b.vn --name "Name" --role TENANT_ADMIN --tenant Number160
 ```
 
-`user:create` prompts for the password; it is never passed as an argument or committed. Other people are
+UAT gets the same accounts on every deploy (after migrations) with the password from the `UAT_SEED_PASSWORD`
+secret; share it privately, never in the repo. `user:create` prompts for the password; it is never passed as an argument or committed. Other people are
 invited from Console → Team; the invitation (72h) and reset (1h) links are shown once to the admin, who sends
 them by Zalo or email.
 
@@ -56,4 +57,5 @@ pnpm test:permission      # only @permission tests
 
 ## Deploy secrets (GitHub Actions)
 
-`VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`, `UAT_DATABASE_MIGRATION_URL` (Supabase session pooler, port 5432).
+`VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`, `UAT_DATABASE_MIGRATION_URL` (Supabase session pooler, port 5432),
+`UAT_SEED_PASSWORD` (optional; test account password on UAT, must meet the password policy).

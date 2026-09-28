@@ -55,6 +55,18 @@ jobs:
           fi
           pnpm migrate
 
+      - name: Seed UAT test accounts
+        env:
+          APP_ENV: uat
+          DATABASE_URL: ${{ secrets.UAT_DATABASE_MIGRATION_URL }}
+          SEED_PASSWORD: ${{ secrets.UAT_SEED_PASSWORD }}
+        run: |
+          if [ -z "$SEED_PASSWORD" ]; then
+            echo "::warning::UAT_SEED_PASSWORD not set, test accounts not seeded"
+            exit 0
+          fi
+          pnpm seed
+
       - name: Deploy
         id: deploy
         run: |

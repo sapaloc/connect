@@ -31,8 +31,11 @@ export const env = Object.freeze({
   seedPassword: source.SEED_PASSWORD || '',
 });
 
-/** Seeds, test resets and fake data are only allowed here (plan §5.1). */
+/** Test resets and fake data are only allowed here (plan §5.1). */
 export const isLocalOrTest = env.appEnv === 'local' || env.appEnv === 'test';
+
+/** Fixed test accounts may also exist on UAT, never on production (plan §5.1). */
+export const canSeedTestAccounts = isLocalOrTest || env.appEnv === 'uat';
 
 /** @param {...keyof typeof names} keys */
 export function requireEnv(...keys) {

@@ -1,7 +1,7 @@
 import { passwordPolicyErrors, ROLES } from '#domain';
 import { pathToFileURL } from 'node:url';
 import pg from 'pg';
-import { env, isLocalOrTest, requireEnv } from '../config/env.js';
+import { canSeedTestAccounts, env, requireEnv } from '../config/env.js';
 import { ensureActiveUser, ensureTenant } from './bootstrap.js';
 import { connectionConfig } from './connection.js';
 
@@ -36,7 +36,7 @@ export async function seed(client, password) {
 }
 
 async function main() {
-  if (!isLocalOrTest) throw new Error(`seed: refused, APP_ENV is "${env.appEnv}" (only local/test)`);
+  if (!canSeedTestAccounts) throw new Error(`seed: refused, APP_ENV is "${env.appEnv}" (only local/test/uat)`);
   requireEnv('databaseUrl', 'seedPassword');
   if (passwordPolicyErrors(env.seedPassword).length) throw new Error('seed: SEED_PASSWORD does not meet the password policy');
   const client = new pg.Client(connectionConfig(env.databaseUrl));
