@@ -1,4 +1,4 @@
-import { passwordPolicyErrors, ROLES } from '@connect/domain';
+import { passwordPolicyErrors, ROLES } from '#domain';
 import { pathToFileURL } from 'node:url';
 import pg from 'pg';
 import { env, isLocalOrTest, requireEnv } from '../config/env.js';

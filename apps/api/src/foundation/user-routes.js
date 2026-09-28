@@ -1,4 +1,4 @@
-import { canInvite, ROLES } from '@connect/domain';
+import { canInvite, ROLES } from '#domain';
 import { actorOf, recordAudit } from '../audit/audit.js';
 import { authed } from '../auth/guard.js';
 import { hashToken, newToken } from '../auth/tokens.js';

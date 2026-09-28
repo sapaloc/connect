@@ -1,4 +1,4 @@
-import { passwordPolicyErrors, ROLES } from '@connect/domain';
+import { passwordPolicyErrors, ROLES } from '#domain';
 import { createInterface } from 'node:readline';
 import { parseArgs } from 'node:util';
 import pg from 'pg';

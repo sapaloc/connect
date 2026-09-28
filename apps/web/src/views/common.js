@@ -1,4 +1,4 @@
-import { PASSWORD_MAX, passwordPolicyErrors } from '@connect/domain';
+import { PASSWORD_MAX, passwordPolicyErrors } from '#domain';
 import { $, esc } from '../dom.js';
 import { getLang, t } from '../i18n.js';
 

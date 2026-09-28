@@ -1,4 +1,4 @@
-import { LANDING, passwordPolicyErrors, permissionsFor } from '@connect/domain';
+import { LANDING, passwordPolicyErrors, permissionsFor } from '#domain';
 import { recordAudit } from '../audit/audit.js';
 import { authed } from '../auth/guard.js';
 import { hashPassword, verifyPassword } from '../auth/password.js';

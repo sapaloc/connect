@@ -5,10 +5,13 @@ Partner referral, voucher and commission app for Number160.
 ## Structure
 
 ```text
-apps/web/     Vite + Bootstrap static web (console, counter, my, public pages)
-apps/api/     Node 22 API (node:http + pg), runs locally via server.js
-api/index.js  Vercel function entry that reuses apps/api
+apps/web/         Vite + Bootstrap static web (console, counter, my, public pages)
+apps/api/         Node 22 API (node:http + pg), runs locally via server.js
+packages/domain/  Roles, permissions, password policy shared by web and API (import from '#domain')
+api/index.js      Vercel function entry that reuses apps/api
 ```
+
+One `package.json` at the root holds every dependency and script.
 
 `apps/api/src/config/env.js` is the only file that reads environment variables. See `.env.example`.
 
