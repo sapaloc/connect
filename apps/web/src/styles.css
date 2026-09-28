@@ -1,0 +1,105 @@
+:root {
+  --sw-bg: #f3efe6;
+  --sw-card: #fbf7ee;
+  --sw-sidebar: #28332c;
+  --sw-ink: #1f2823;
+  --sw-ink2: #3d4a41;
+  --sw-ink3: #6b7771;
+  --sw-line: #dcd4c3;
+  --sw-acc: #b8643f;
+  --sw-acc-soft: #f2dcc9;
+  --sw-info: #2f6f58;
+  --sw-warn: #b8843f;
+  --sw-danger: #a8463f;
+  --sw-good: #2f8758;
+
+  --bs-body-bg: var(--sw-bg);
+  --bs-body-color: var(--sw-ink);
+  --bs-body-font-family: 'DM Sans', system-ui, sans-serif;
+  --bs-border-color: var(--sw-line);
+  --bs-secondary-color: var(--sw-ink3);
+  --bs-link-color: var(--sw-acc);
+  --bs-focus-ring-color: rgba(184, 100, 63, 0.25);
+}
+
+.btn-primary {
+  --bs-btn-bg: var(--sw-acc);
+  --bs-btn-border-color: var(--sw-acc);
+  --bs-btn-hover-bg: #a2573a;
+  --bs-btn-hover-border-color: #a2573a;
+  --bs-btn-active-bg: #8f4d33;
+  --bs-btn-active-border-color: #8f4d33;
+  --bs-btn-disabled-bg: var(--sw-acc);
+  --bs-btn-disabled-border-color: var(--sw-acc);
+}
+
+.btn-outline-secondary {
+  --bs-btn-color: var(--sw-ink2);
+  --bs-btn-border-color: var(--sw-line);
+  --bs-btn-hover-bg: var(--sw-acc-soft);
+  --bs-btn-hover-color: var(--sw-ink);
+  --bs-btn-hover-border-color: var(--sw-line);
+  --bs-btn-active-bg: var(--sw-sidebar);
+  --bs-btn-active-color: #fff;
+  --bs-btn-active-border-color: var(--sw-sidebar);
+}
+
+.form-control:focus {
+  border-color: var(--sw-acc);
+  box-shadow: 0 0 0 0.25rem var(--bs-focus-ring-color);
+}
+
+.text-muted {
+  color: var(--sw-ink3) !important;
+}
+
+.auth-shell {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 16px;
+  gap: 16px;
+}
+
+.auth-card {
+  width: 100%;
+  max-width: 420px;
+  background: var(--sw-card);
+  border: 1px solid var(--sw-line);
+  border-radius: 16px;
+  padding: 32px 28px;
+  box-shadow: 0 8px 24px rgba(31, 40, 35, 0.06);
+}
+
+.brand {
+  font-family: Georgia, serif;
+  font-size: 22px;
+  letter-spacing: 0.08em;
+  color: var(--sw-sidebar);
+}
+
+.status-line {
+  font-size: 13px;
+  color: var(--sw-ink3);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 20px;
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.dot-ok {
+  background: var(--sw-good);
+}
+
+.dot-down {
+  background: var(--sw-danger);
+}

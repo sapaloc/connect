@@ -22,25 +22,27 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: pnpm/action-setup@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
+          cache: pnpm
 
       - name: Install
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
       - name: Syntax check
-        run: npm run check:syntax
+        run: pnpm run check:syntax
 
       - name: Lint
-        run: npm run lint --if-present
+        run: pnpm run --if-present lint
 
       - name: Typecheck
-        run: npm run typecheck --if-present
+        run: pnpm run --if-present typecheck
 
       - name: SQL check
-        run: npm run sql:check --if-present
+        run: pnpm run --if-present sql:check
 
       - name: Build
-        run: npm run build --if-present
+        run: pnpm run build
