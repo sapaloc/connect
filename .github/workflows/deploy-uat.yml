@@ -15,7 +15,7 @@ concurrency:
 env:
   VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
   VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
-  HEALTH_PATH: /api/health
+  HEALTH_PATH: /api/v1/health
 
 jobs:
   deploy:
@@ -25,9 +25,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: pnpm/action-setup@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
 
       - name: Install Vercel CLI
         run: npm install --global vercel@60
@@ -37,6 +43,17 @@ jobs:
 
       - name: Build
         run: vercel build --prod --token="${{ secrets.VERCEL_TOKEN }}"
+
+      # Vercel secret env values are not readable at build time, so migrations use a GitHub secret.
+      - name: Migrate UAT database
+        env:
+          DATABASE_MIGRATION_URL: ${{ secrets.UAT_DATABASE_MIGRATION_URL }}
+        run: |
+          if [ -z "$DATABASE_MIGRATION_URL" ]; then
+            echo "::error::Missing repository secret UAT_DATABASE_MIGRATION_URL"
+            exit 1
+          fi
+          pnpm migrate
 
       - name: Deploy
         id: deploy

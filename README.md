@@ -1,71 +1,56 @@
-# Connect — total solution
-Node.js + Express + file NoSQL (`data.json`). Serves API + frontend statically.
-- `view/` — Internal Console / MyConnect / Counter / Microsite (jQuery + Bootstrap). Works standalone (localStorage demo) or connected to backend (same-origin `/api/*`, badge `API ● connected`).
-- `src/` — modular backend: `config`, `utils`, `db/` (seed, file store, finance), `auth/` (policy, sessions, RBAC), `routes/` (one module per domain), `app.js` (wiring). Entry: `server.js`.
-- `server.js` — slim boot entry (`npm start`).
+# Connect V1
 
+Partner referral, voucher and commission app for Number160.
 
-## Quick start (total solution)
+## Structure
 
-```bat
-npm install
-npm start
+```text
+apps/web/     Vite + Bootstrap static web (console, counter, my, public pages)
+apps/api/     Node 22 API (node:http + pg), runs locally via server.js
+api/index.js  Vercel function entry that reuses apps/api
 ```
 
-Open **http://localhost:3000**
+`apps/api/src/config/env.js` is the only file that reads environment variables. See `.env.example`.
 
-- App: `http://localhost:3000/`
-- Anonymous microsite: `http://localhost:3000/?view=microsite&r=SAPAWO-AN-88`
-- Health: `http://localhost:3000/api/health`
+## Local development
 
-Demo logins: `tenant@sapawoo.vn / admin123`, `manager@number160.vn / staff123`, `staff@number160.vn / staff123`, `partner@company.vn / partner123`, `platform@sapawoo.vn / admin123` (needs support reason).
+```bash
+pnpm install
+cp .env.example .env      # point DATABASE_URL at a local Postgres
+pnpm migrate
+pnpm dev                  # web http://localhost:5173, api http://localhost:3000
+```
 
-## How frontend ↔ backend are linked
+Health check: `GET /api/v1/health`.
 
-- `view/js/api.js` — fetch wrapper, token in `localStorage connect_token`, `health()` probe.
-- Login: tries `POST /api/auth/login` first, falls back to local demo when backend unreachable.
-- After login: `GET /api/db` scoped snapshot replaces local DB.
-- Voucher activation + counter validate/redeem: backend-first (`/api/vouchers/activate`, `/api/counter/*`), local fallback.
-- Badge `#api-badge` shows `API ● connected` vs `API ○ local`.
+## Accounts
 
-## Backend notes
+```bash
+pnpm seed                 # local/test only: Platform Admin, Tenant Admin, Manager, Staff, multi-role user
+                          # (emails in apps/api/src/db/seed-local.js, password = SEED_PASSWORD in .env)
+DATABASE_URL=<uat pooler url> pnpm user:create --email a@b.vn --name "Name" --role TENANT_ADMIN --tenant Number160
+```
 
-- File DB `data.json` auto-seeded, atomic tmp+rename writes, audit log, 8h sessions, 5/5min rate limit, server-side finance (`discount → payable → VAT removal → netNet → commissions`), idempotent redeem, settlement payout-verification gate.
+`user:create` prompts for the password; it is never passed as an argument or committed. Other people are
+invited from Console → Team; the invitation (72h) and reset (1h) links are shown once to the admin, who sends
+them by Zalo or email.
 
-## API
+## Tests
 
-- `GET /api/health`
-- `POST /api/auth/login` `{email,pass,role,supportReason}` → `{token,user,role,scope}`
-- `POST /api/auth/logout`, `GET /api/me`, `GET /api/db` (scoped snapshot)
-- `GET /api/:col` — partners|locations|referrers|budgets|media|cards|services|vouchers|redemptions|payouts|settlements|audits|events
-- `POST /api/partners`, `POST /api/partners/:id/transition`
-- `POST /api/locations`, `DELETE /api/locations/:id`
-- `POST /api/referrers`, `POST /api/referrers/:id/transition`
-- `POST /api/budgets`, `POST /api/media`, `POST /api/media/:id/replace|block`
-- `POST /api/cards`, `POST /api/cards/:id/transition`
-- `POST /api/vouchers/activate` `{code,deviceId,force?}` (anonymous, no auth)
-- `POST /api/counter/validate|redeem` (auth, redeem = staff/manager/tenant)
-- `POST /api/redemptions/:id/void` `{reason}` (manager)
-- `POST /api/payouts`, `POST /api/payouts/:id/verify`
-- `POST /api/settlements` `{itemIds,amount?,ref?,note?,evidence,confirm:true}`
-- `POST /api/services`, `PUT /api/site`, `PUT /api/settings`
-- `GET /api/reports/funnel`
+Integration tests use `.env.test` and drop the `public` schema of `connect_test`, so run them against a
+throwaway Postgres only (same image and port as CI `domain-tests`):
 
-Auth: `Authorization: Bearer <token>`. Rate limit 5/5min, 8h session expiry.
-Demo logins: `tenant@sapawoo.vn/admin123`, `manager@number160.vn/staff123`, `partner@company.vn/partner123`.
+```bash
+docker run -d --name connect-postgres -p 5433:5432 \
+  -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=connect_test postgres:16-alpine
+pnpm test                 # all packages
+pnpm test:permission      # only @permission tests
+```
 
-## Railway deployment
+## Branches
 
-Railway auto-detects Node (Nixpacks). This repo ships `railway.toml` + `Procfile` + `.nvmrc`:
+`feature/<issue>-<name>` → `develop` → `uat` (auto-deploys to Vercel `connect-uat`) → `master` (manual promotion).
 
-1. Push to GitHub, **New Project → Deploy from Repo** in Railway.
-2. No build config needed — defaults work: install via `npm install`, start via `npm start`, healthcheck `GET /api/health`.
-3. Railway injects `PORT` automatically (already honored via `src/config.js`); the app binds `0.0.0.0`.
+## Deploy secrets (GitHub Actions)
 
-**Persistence:** Railway's filesystem is ephemeral — `data.json` reseeds on each redeploy unless you attach a volume:
-
-1. Railway service → **Volumes → Add Volume**, mount path `/data`.
-2. Set env var `DATA_FILE=/data/data.json` (or `DATA_DIR=/data`).
-3. Redeploy — the store is created/loaded at that path from then on.
-
-Useful env vars: `PORT` (auto), `HOST` (default `0.0.0.0`), `DATA_FILE`, `DATA_DIR`, `FRONT_DIR`, `JSON_LIMIT`.
+`VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`, `UAT_DATABASE_MIGRATION_URL` (Supabase session pooler, port 5432).
