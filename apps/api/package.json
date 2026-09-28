@@ -5,7 +5,10 @@
   "scripts": {
     "dev": "node --watch --env-file-if-exists=../../.env server.js",
     "start": "node server.js",
-    "migrate": "node --env-file-if-exists=../../.env src/db/migrate.js"
+    "migrate": "node --env-file-if-exists=../../.env src/db/migrate.js",
+    "seed": "node --env-file-if-exists=../../.env src/db/seed-local.js",
+    "user:create": "node --env-file-if-exists=../../.env src/db/create-user.js",
+    "test": "node --env-file-if-exists=../../.env.test --test --test-concurrency=1 'test/**/*.test.js'"
   },
   "dependencies": {
     "pg": "^8.13.1"

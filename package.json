@@ -10,6 +10,13 @@
     "dev": "pnpm --parallel --filter @connect/api --filter @connect/web dev",
     "build": "pnpm --filter @connect/web build",
     "migrate": "pnpm --filter @connect/api migrate",
+    "seed": "pnpm --filter @connect/api seed",
+    "user:create": "pnpm --filter @connect/api user:create",
+    "test": "pnpm -r --workspace-concurrency=1 test",
+    "test:permission": "pnpm -r --workspace-concurrency=1 test --test-name-pattern=@permission",
     "check:syntax": "git ls-files '*.js' '*.mjs' | xargs -n1 node --check"
+  },
+  "dependencies": {
+    "@connect/domain": "workspace:*"
   }
 }

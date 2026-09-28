@@ -1,19 +1,53 @@
+import { authRoutes } from '../foundation/auth-routes.js';
 import { health } from '../foundation/health.js';
+import { userRoutes } from '../foundation/user-routes.js';
 
 /**
- * @typedef {(req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse) => Promise<void>} Handler
+ * @typedef {{ params: Record<string, string>, requestId: string, session?: import('../auth/session.js').Session }} Context
+ * @typedef {(req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse, ctx: Context) => Promise<void>} Handler
+ * @typedef {{ method: string, path: string, handler: Handler }} RouteDef
  */
 
-/** @type {Record<string, Handler>} */
-const routes = {
-  'GET /api/v1/health': health,
-};
+/** @type {RouteDef[]} */
+const definitions = [{ method: 'GET', path: '/api/v1/health', handler: health }, ...authRoutes, ...userRoutes];
+
+const routes = definitions.map(({ method, path, handler }) => {
+  /** @type {string[]} */
+  const keys = [];
+  const pattern = path.replace(/:([a-zA-Z]+)/g, (_match, key) => {
+    keys.push(key);
+    return '([^/]+)';
+  });
+  return { method, regex: new RegExp(`^${pattern}$`), keys, handler };
+});
 
 /**
  * @param {string} method
  * @param {string} path
- * @returns {Handler | undefined}
+ * @returns {{ handler: Handler, params: Record<string, string> } | { methodNotAllowed: true } | undefined}
  */
 export function findRoute(method, path) {
-  return routes[`${method} ${path}`];
+  let pathMatched = false;
+  for (const route of routes) {
+    const match = route.regex.exec(path);
+    if (!match) continue;
+    pathMatched = true;
+    if (route.method !== method) continue;
+    /** @type {Record<string, string>} */
+    const params = {};
+    route.keys.forEach((key, index) => {
+      params[key] = safeDecode(match[index + 1]);
+    });
+    return { handler: route.handler, params };
+  }
+  return pathMatched ? { methodNotAllowed: true } : undefined;
+}
+
+/** @param {string} value */
+function safeDecode(value) {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
 }

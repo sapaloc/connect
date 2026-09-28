@@ -7,6 +7,7 @@ const names = {
   databaseMigrationUrl: 'DATABASE_MIGRATION_URL',
   sessionSecret: 'SESSION_SECRET',
   internalJobSecret: 'INTERNAL_JOB_SECRET',
+  seedPassword: 'SEED_PASSWORD',
 };
 
 export const env = Object.freeze({
@@ -27,7 +28,11 @@ export const env = Object.freeze({
   }),
   logLevel: source.LOG_LEVEL || 'info',
   commitSha: source.VERCEL_GIT_COMMIT_SHA || source.GITHUB_SHA || '',
+  seedPassword: source.SEED_PASSWORD || '',
 });
+
+/** Seeds, test resets and fake data are only allowed here (plan §5.1). */
+export const isLocalOrTest = env.appEnv === 'local' || env.appEnv === 'test';
 
 /** @param {...keyof typeof names} keys */
 export function requireEnv(...keys) {

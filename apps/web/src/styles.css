@@ -103,3 +103,153 @@
 .dot-down {
   background: var(--sw-danger);
 }
+
+.form-message:empty {
+  display: none;
+}
+
+.form-message[data-tone='error'] {
+  color: var(--sw-danger);
+}
+
+.form-message[data-tone='success'] {
+  color: var(--sw-good);
+}
+
+.policy li {
+  color: var(--sw-ink3);
+  padding-left: 20px;
+  position: relative;
+}
+
+.policy li::before {
+  content: '○';
+  position: absolute;
+  left: 0;
+}
+
+.policy li.ok {
+  color: var(--sw-good);
+}
+
+.policy li.ok::before {
+  content: '✓';
+}
+
+.role-option.active {
+  border-color: var(--sw-acc);
+}
+
+.invite-who {
+  background: var(--sw-bg);
+  border: 1px solid var(--sw-line);
+  border-radius: 10px;
+  padding: 10px 14px;
+}
+
+.app-shell {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px 24px;
+  padding: 12px 24px;
+  background: var(--sw-card);
+  border-bottom: 1px solid var(--sw-line);
+}
+
+.topbar-nav {
+  display: flex;
+  gap: 4px;
+}
+
+.topbar-nav a {
+  padding: 6px 12px;
+  border-radius: 8px;
+  color: var(--sw-ink2);
+  text-decoration: none;
+}
+
+.topbar-nav a.active {
+  background: var(--sw-sidebar);
+  color: #fff;
+}
+
+.topbar-right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.who {
+  line-height: 1.2;
+  margin-right: 8px;
+  text-align: right;
+}
+
+.who .small {
+  color: var(--sw-ink3);
+}
+
+.app-main {
+  width: 100%;
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 24px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.panel {
+  background: var(--sw-card);
+  border: 1px solid var(--sw-line);
+  border-radius: 14px;
+  padding: 20px;
+}
+
+.link-box {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px dashed var(--sw-acc);
+  border-radius: 10px;
+  background: var(--sw-acc-soft);
+}
+
+.table {
+  --bs-table-bg: transparent;
+}
+
+.status {
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--sw-line);
+}
+
+.status-active {
+  background: #d7eadf;
+  color: var(--sw-good);
+}
+
+.status-invited {
+  background: var(--sw-acc-soft);
+  color: var(--sw-acc);
+}
+
+@media (max-width: 576px) {
+  .topbar {
+    padding: 10px 16px;
+  }
+
+  .who {
+    text-align: left;
+  }
+}

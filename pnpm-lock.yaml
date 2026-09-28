@@ -6,7 +6,11 @@ settings:
 
 importers:
 
-  .: {}
+  .:
+    dependencies:
+      '@connect/domain':
+        specifier: workspace:*
+        version: link:packages/domain
 
   apps/api:
     dependencies:
@@ -23,6 +27,8 @@ importers:
       vite:
         specifier: ^6.0.0
         version: 6.4.3
+
+  packages/domain: {}
 
 packages:
 

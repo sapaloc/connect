@@ -23,6 +23,30 @@ pnpm dev                  # web http://localhost:5173, api http://localhost:3000
 
 Health check: `GET /api/v1/health`.
 
+## Accounts
+
+```bash
+pnpm seed                 # local/test only: Platform Admin, Tenant Admin, Manager, Staff, multi-role user
+                          # (emails in apps/api/src/db/seed-local.js, password = SEED_PASSWORD in .env)
+DATABASE_URL=<uat pooler url> pnpm user:create --email a@b.vn --name "Name" --role TENANT_ADMIN --tenant Number160
+```
+
+`user:create` prompts for the password; it is never passed as an argument or committed. Other people are
+invited from Console → Team; the invitation (72h) and reset (1h) links are shown once to the admin, who sends
+them by Zalo or email.
+
+## Tests
+
+Integration tests use `.env.test` and drop the `public` schema of `connect_test`, so run them against a
+throwaway Postgres only (same image and port as CI `domain-tests`):
+
+```bash
+docker run -d --name connect-postgres -p 5433:5432 \
+  -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=connect_test postgres:16-alpine
+pnpm test                 # all packages
+pnpm test:permission      # only @permission tests
+```
+
 ## Branches
 
 `feature/<issue>-<name>` → `develop` → `uat` (auto-deploys to Vercel `connect-uat`) → `master` (manual promotion).
