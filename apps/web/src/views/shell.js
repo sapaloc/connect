@@ -4,6 +4,7 @@ import { icon, navItem, visibleNav } from '../nav.js';
 import { getTheme } from '../theme.js';
 import { counterPanel, mountCounter } from './counter.js';
 import { merchantsPanel, mountMerchants } from './merchants.js';
+import { mountPartners, partnersPanel } from './partners.js';
 import { mountTeam, teamPanel } from './team.js';
 import { mountVouchers, vouchersPanel } from './vouchers.js';
 
@@ -188,6 +189,12 @@ export function merchantsView(app) {
 export function vouchersView(app) {
   render(app, '/console/vouchers', vouchersPanel(app));
   mountVouchers(app);
+}
+
+/** @param {App} app */
+export function partnersView(app) {
+  render(app, '/console/partners', partnersPanel(app));
+  mountPartners(app);
 }
 
 /** @param {App} app */

@@ -107,6 +107,66 @@ export function commercialRuleErrors(rule) {
 }
 
 /**
+ * Commercial rule from the percents a Merchant admin types (at most 2 decimals). The commission is
+ * derived as total budget − customer discount, and a company's net as commission − individual share,
+ * so the allocation always adds up (REQ §6).
+ * @param {{ relationshipKind: unknown, totalBudgetPercent: unknown, customerDiscountPercent: unknown, individualSharePercent?: unknown }} input
+ * @returns {{ rule: CommercialRule | null, errors: string[] }}
+ */
+export function commercialRuleFromPercents({ relationshipKind, totalBudgetPercent, customerDiscountPercent, individualSharePercent = '0' }) {
+  /** @type {string[]} */
+  const errors = [];
+  /** @param {unknown} value @param {string} code */
+  const percent = (value, code) => {
+    try {
+      const parsed = parseDecimal(value, code);
+      if (parsed.gt(100) || parsed.decimalPlaces() > 2) throw new Error();
+      return parsed.div(100);
+    } catch {
+      errors.push(`${code}_INVALID`);
+      return null;
+    }
+  };
+  if (relationshipKind !== RELATIONSHIP_KINDS.COMPANY && relationshipKind !== RELATIONSHIP_KINDS.INDEPENDENT_INDIVIDUAL) {
+    return { rule: null, errors: ['RELATIONSHIP_KIND_INVALID'] };
+  }
+  const total = percent(totalBudgetPercent, 'TOTAL_BUDGET');
+  const discount = percent(customerDiscountPercent, 'CUSTOMER_DISCOUNT');
+  const share = relationshipKind === RELATIONSHIP_KINDS.COMPANY ? percent(individualSharePercent, 'INDIVIDUAL_SHARE') : new D(0);
+  if (!total || !discount || !share) return { rule: null, errors };
+  if (discount.lt(MIN_CUSTOMER_DISCOUNT_RATE)) errors.push('CUSTOMER_DISCOUNT_BELOW_MINIMUM');
+  if (discount.gte(total)) errors.push('CUSTOMER_DISCOUNT_NOT_BELOW_TOTAL_BUDGET');
+  const commission = total.minus(discount);
+  if (share.gt(commission)) errors.push('INDIVIDUAL_SHARE_ABOVE_COMMISSION');
+  if (errors.length) return { rule: null, errors };
+
+  /** @type {CommercialRule} */
+  const rule =
+    relationshipKind === RELATIONSHIP_KINDS.COMPANY
+      ? {
+          relationshipKind,
+          totalBudgetRate: text(total),
+          customerDiscountRate: text(discount),
+          companyCommissionRate: text(commission),
+          individualShareRate: text(share),
+          companyNetCommissionRate: text(commission.minus(share)),
+        }
+      : { relationshipKind, totalBudgetRate: text(total), customerDiscountRate: text(discount), individualCommissionRate: text(commission) };
+  const invalid = commercialRuleErrors(rule);
+  return invalid.length ? { rule: null, errors: invalid } : { rule, errors: [] };
+}
+
+/**
+ * VAT typed as a percent with at most 2 decimals ("8", "10"), stored as a rate ("0.0800").
+ * @param {unknown} value
+ */
+export function parseVatPercent(value) {
+  const percent = parseDecimal(value, 'vatPercent');
+  if (percent.gte(100) || percent.decimalPlaces() > 2) throw new MoneyError('VAT_RATE_INVALID', 'vatPercent must be below 100', 'vatPercent');
+  return text(percent.div(100));
+}
+
+/**
  * @typedef {{ obligationType: string, rate: string, baseAmount: string, amount: string }} CommissionItem
  * @typedef {{
  *   grossInvoiceAmount: string,

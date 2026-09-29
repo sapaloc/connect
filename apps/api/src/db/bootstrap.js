@@ -6,17 +6,21 @@ import { collection } from './mongo.js';
 /** @typedef {{ session?: import('mongodb').ClientSession }} TxOptions */
 
 /**
- * A role assignment embedded in `users.roles`.
- * @param {{ role: string, tenantId: string | null, createdBy?: string | null }} input
+ * @typedef {{ role: string, tenantId: string | null, partnerRelationshipId?: string | null, createdBy?: string | null }} RoleInput
  */
-export function newRoleAssignment({ role, tenantId, createdBy = null }) {
+
+/**
+ * A role assignment embedded in `users.roles`. Partner roles are scoped to one partner relationship.
+ * @param {RoleInput} input
+ */
+export function newRoleAssignment({ role, tenantId, partnerRelationshipId = null, createdBy = null }) {
   const now = new Date();
   return {
     _id: randomUUID(),
     role,
-    scopeType: role === ROLES.PLATFORM_ADMIN ? 'PLATFORM' : 'TENANT',
+    scopeType: role === ROLES.PLATFORM_ADMIN ? 'PLATFORM' : partnerRelationshipId ? 'PARTNER_RELATIONSHIP' : 'TENANT',
     tenantId,
-    partnerRelationshipId: null,
+    partnerRelationshipId,
     affiliatedReferrerId: null,
     status: 'ACTIVE',
     validFrom: now,
@@ -27,15 +31,16 @@ export function newRoleAssignment({ role, tenantId, createdBy = null }) {
 }
 
 /**
- * Adds the role unless the user already holds it, active, in the same tenant.
+ * Adds the role unless the user already holds it, active, in the same tenant (and partner).
  * @param {string} userId
- * @param {{ role: string, tenantId: string | null, createdBy?: string | null }} input
+ * @param {RoleInput} input
  * @param {TxOptions} [options]
  */
 export async function grantRole(userId, input, options = {}) {
   const users = await collection('users');
+  const same = { role: input.role, tenantId: input.tenantId, partnerRelationshipId: input.partnerRelationshipId ?? null, status: 'ACTIVE' };
   await users.updateOne(
-    { _id: userId, roles: { $not: { $elemMatch: { role: input.role, tenantId: input.tenantId, status: 'ACTIVE' } } } },
+    { _id: userId, roles: { $not: { $elemMatch: same } } },
     { $push: { roles: newRoleAssignment(input) }, $set: { updatedAt: new Date() } },
     options,
   );
