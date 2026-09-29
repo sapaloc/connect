@@ -6,6 +6,7 @@ import {
   bindPasswordPolicy,
   messageSlot,
   passwordFields,
+  passwordInput,
   passwordProblem,
   showMessage,
 } from './common.js';
@@ -17,6 +18,7 @@ export function loginView(app) {
   app.root.innerHTML = authLayout({
     title: t('signInTitle'),
     subtitle: t('signInSubtitle'),
+    back: { href: '/', label: t('backHome') },
     body: `
       <form id="sign-in" novalidate>
         <div class="mb-3">
@@ -26,8 +28,7 @@ export function loginView(app) {
         </div>
         <div class="mb-4">
           <label for="password" class="form-label">${esc(t('password'))}</label>
-          <input id="password" name="password" type="password" class="form-control form-control-lg"
-            autocomplete="current-password" required />
+          ${passwordInput({ id: 'password', autocomplete: 'current-password' })}
         </div>
         <button type="submit" class="btn btn-primary btn-lg w-100">${esc(t('signIn'))}</button>
         ${messageSlot()}
@@ -98,6 +99,7 @@ export function forgotView(app) {
   app.root.innerHTML = authLayout({
     title: t('forgotTitle'),
     subtitle: t('forgotSubtitle'),
+    back: { href: '/login', label: t('backToSignIn') },
     body: `
       <form id="forgot" novalidate>
         <div class="mb-4">
@@ -106,7 +108,6 @@ export function forgotView(app) {
         </div>
         <button type="submit" class="btn btn-primary btn-lg w-100">${esc(t('forgotSubmit'))}</button>
         ${messageSlot()}
-        <p class="text-center small mt-3 mb-0"><a href="/login" data-nav>${esc(t('backToSignIn'))}</a></p>
       </form>`,
   });
 
@@ -148,6 +149,7 @@ function passwordLinkForm(app, text, onSubmit) {
   app.root.innerHTML = authLayout({
     title: text.title,
     subtitle: text.subtitle,
+    back: { href: '/login', label: t('backToSignIn') },
     body: token
       ? `
       <form id="password-link" novalidate>

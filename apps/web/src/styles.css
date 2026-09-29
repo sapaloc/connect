@@ -139,6 +139,64 @@ body {
   color: var(--sw-sidebar);
 }
 
+a.brand:hover {
+  color: var(--sw-sidebar);
+}
+
+.back-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 44px;
+  margin: -12px 0 4px -6px;
+  padding: 0 6px;
+  color: var(--sw-ink2);
+  font-size: 14px;
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.back-link:hover {
+  color: var(--sw-acc);
+}
+
+.password-field {
+  position: relative;
+}
+
+.password-field .form-control {
+  padding-right: 52px;
+}
+
+.password-field .form-control::-ms-reveal {
+  display: none;
+}
+
+.password-reveal {
+  position: absolute;
+  top: 50%;
+  right: 4px;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  transform: translateY(-50%);
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--sw-ink3);
+}
+
+.password-reveal:hover,
+.password-reveal[aria-pressed='true'] {
+  color: var(--sw-ink);
+}
+
+.password-reveal:focus-visible {
+  outline: 2px solid var(--sw-acc);
+  outline-offset: -2px;
+}
+
 .status-line {
   font-size: 13px;
   color: var(--sw-ink3);
