@@ -108,7 +108,7 @@ document.addEventListener('click', (event) => {
   }
   const lang = target.closest('[data-lang]');
   if (lang) {
-    setLang(lang.getAttribute('data-lang') ?? 'vi');
+    setLang(lang.getAttribute('data-lang') ?? 'en');
     route();
     return;
   }

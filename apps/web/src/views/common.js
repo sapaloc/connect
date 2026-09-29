@@ -8,7 +8,7 @@ export function langToggle() {
   const lang = getLang();
   return `
     <div class="btn-group btn-group-sm" role="group" aria-label="Language">
-      ${['vi', 'en']
+      ${['en', 'vi']
         .map(
           (code) =>
             `<button type="button" class="btn btn-outline-secondary${code === lang ? ' active' : ''}" data-lang="${code}">${code.toUpperCase()}</button>`,
