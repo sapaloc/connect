@@ -1,6 +1,7 @@
 import { PASSWORD_MAX, passwordPolicyErrors } from '#domain';
 import { $, esc } from '../dom.js';
 import { getLang, t } from '../i18n.js';
+import { icon } from '../nav.js';
 
 const RULES = ['LENGTH', 'UPPER', 'LOWER', 'DIGIT', 'SPECIAL'];
 
@@ -17,18 +18,24 @@ export function langToggle() {
     </div>`;
 }
 
+/** @param {{ href: string, label: string }} back */
+export function backLink({ href, label }) {
+  return `<a href="${esc(href)}" data-nav class="back-link">${icon('back')}<span>${esc(label)}</span></a>`;
+}
+
 /**
  * Centered card used by every signed-out page.
- * @param {{ title: string, subtitle?: string, body: string }} content
+ * @param {{ title: string, subtitle?: string, body: string, back?: { href: string, label: string } }} content
  */
-export function authLayout({ title, subtitle = '', body }) {
+export function authLayout({ title, subtitle = '', body, back }) {
   return `
     <main class="auth-shell">
       <section class="auth-card">
         <header class="d-flex justify-content-between align-items-center mb-4">
-          <span class="brand">MYCONNECT</span>
+          <a href="/" data-nav class="brand text-decoration-none">MYCONNECT</a>
           ${langToggle()}
         </header>
+        ${back ? backLink(back) : ''}
         <h1 class="h4 mb-1">${esc(title)}</h1>
         ${subtitle ? `<p class="text-muted mb-4">${esc(subtitle)}</p>` : ''}
         ${body}
@@ -76,18 +83,45 @@ export function showLink(message, url, boxId = 'link-box') {
   });
 }
 
+/**
+ * Password input with a show/hide button (see `togglePasswordReveal`).
+ * @param {{ id: string, autocomplete: string, maxlength?: number }} field
+ */
+export function passwordInput({ id, autocomplete, maxlength }) {
+  return `
+    <div class="password-field">
+      <input id="${id}" name="${id}" type="password" class="form-control form-control-lg"
+        autocomplete="${autocomplete}"${maxlength ? ` maxlength="${maxlength}"` : ''} required />
+      <button type="button" class="password-reveal" data-reveal="${id}" aria-controls="${id}" aria-pressed="false"
+        aria-label="${esc(t('showPassword'))}" title="${esc(t('showPassword'))}">${icon('eye')}</button>
+    </div>`;
+}
+
+/** @param {HTMLElement} button a `[data-reveal]` button from `passwordInput` */
+export function togglePasswordReveal(button) {
+  const input = /** @type {HTMLInputElement | null} */ (document.getElementById(button.dataset.reveal ?? ''));
+  if (!input) return;
+  const show = input.type === 'password';
+  input.type = show ? 'text' : 'password';
+  const label = t(show ? 'hidePassword' : 'showPassword');
+  button.setAttribute('aria-pressed', String(show));
+  button.setAttribute('aria-label', label);
+  button.title = label;
+  button.innerHTML = icon(show ? 'eyeOff' : 'eye');
+  input.focus({ preventScroll: true });
+  input.setSelectionRange(input.value.length, input.value.length);
+}
+
 /** Password + repeat fields with a live checklist of the policy (§8.2). */
 export function passwordFields() {
   return `
     <div class="mb-3">
       <label for="password" class="form-label">${esc(t('newPassword'))}</label>
-      <input id="password" name="password" type="password" class="form-control form-control-lg"
-        autocomplete="new-password" maxlength="${PASSWORD_MAX}" required />
+      ${passwordInput({ id: 'password', autocomplete: 'new-password', maxlength: PASSWORD_MAX })}
     </div>
     <div class="mb-3">
       <label for="confirm" class="form-label">${esc(t('confirmPassword'))}</label>
-      <input id="confirm" name="confirm" type="password" class="form-control form-control-lg"
-        autocomplete="new-password" maxlength="${PASSWORD_MAX}" required />
+      ${passwordInput({ id: 'confirm', autocomplete: 'new-password', maxlength: PASSWORD_MAX })}
     </div>
     <div class="policy mb-4">
       <p class="small mb-1">${esc(t('policyTitle'))}</p>
