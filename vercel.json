@@ -6,8 +6,9 @@
   "outputDirectory": "apps/web/dist",
   "regions": ["sin1"],
   "functions": {
-    "api/index.js": { "maxDuration": 10 }
+    "api/index.js": { "maxDuration": 30 }
   },
+  "crons": [{ "path": "/api/v1/internal/jobs/backup", "schedule": "0 19 * * *" }],
   "rewrites": [
     { "source": "/api/(.*)", "destination": "/api" },
     { "source": "/(.*)", "destination": "/index.html" }
