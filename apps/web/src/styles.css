@@ -1240,3 +1240,24 @@ a.brand:hover {
     transition: none;
   }
 }
+
+.my-page {
+  display: grid;
+  gap: 16px;
+}
+
+.my-recent {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.my-recent li {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 10px;
+  font-variant-numeric: tabular-nums;
+}

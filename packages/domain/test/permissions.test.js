@@ -6,7 +6,16 @@ const ALL_ROLES = Object.values(ROLES);
 
 /** Expected grants per role; any change to the matrix must update this table on purpose. */
 const EXPECTED = {
-  PLATFORM_ADMIN: ['surface.console', 'merchant.manage', 'user.list', 'user.invite', 'user.reset_link', 'partner.list', 'voucher.list'],
+  PLATFORM_ADMIN: [
+    'surface.console',
+    'merchant.manage',
+    'user.list',
+    'user.invite',
+    'user.reset_link',
+    'partner.list',
+    'voucher.list',
+    'commission.list',
+  ],
   TENANT_ADMIN: [
     'surface.console',
     'user.list',
@@ -19,6 +28,7 @@ const EXPECTED = {
     'voucher.issue',
     'voucher.list',
     'voucher.void',
+    'commission.list',
   ],
   MANAGER: [
     'surface.console',
@@ -32,8 +42,8 @@ const EXPECTED = {
     'redemption.void',
   ],
   STAFF: ['surface.counter', 'voucher.validate', 'redemption.create'],
-  PARTNER_ADMIN: ['surface.my'],
-  REFERRER: ['surface.my'],
+  PARTNER_ADMIN: ['surface.my', 'commission.view_own'],
+  REFERRER: ['surface.my', 'commission.view_own'],
 };
 
 describe('@permission matrix', () => {
@@ -58,6 +68,11 @@ describe('@permission matrix', () => {
   it('Manager can void but cannot change rates (§18.5)', () => {
     assert.equal(can(ROLES.MANAGER, 'redemption.void'), true);
     assert.equal(can(ROLES.MANAGER, 'commercial_rule.manage'), false);
+  });
+
+  it('Staff and Manager never see commission (DEC-088)', () => {
+    assert.equal(can(ROLES.STAFF, 'commission.list'), false);
+    assert.equal(can(ROLES.MANAGER, 'commission.list'), false);
   });
 
   it('Staff cannot open the console (E2E-S1-01)', () => {

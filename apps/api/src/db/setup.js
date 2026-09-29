@@ -9,7 +9,7 @@ import { closeClient, COLLECTIONS, getDb } from './mongo.js';
  * Bump when a validator or index changes. Changes must keep old documents valid
  * (add optional fields; backfill in a script before making a field required).
  */
-export const SCHEMA_VERSION = 5;
+export const SCHEMA_VERSION = 6;
 
 const DAY_SECONDS = 24 * 60 * 60;
 const uuid = { bsonType: 'string', pattern: '^[0-9a-f-]{36}$' };
@@ -371,6 +371,39 @@ const DEFINITIONS = {
     indexes: [
       { key: { tenantId: 1, partnerId: 1, visitedAt: -1 }, name: 'tenant_partner_visited' },
       { key: { mediumId: 1, browserContextId: 1, visitedAt: -1 }, name: 'medium_browser' },
+    ],
+  },
+
+  // What the merchant owes a partner for one redemption (plan §9.7). Voiding the redemption voids its items.
+  [COLLECTIONS.commissionItems]: {
+    schema: {
+      bsonType: 'object',
+      required: ['_id', 'tenantId', 'voucherId', 'redemptionId', 'partnerId', 'obligationType', 'rate', 'baseAmount', 'amount', 'status', 'redeemedAt', 'createdAt'],
+      properties: {
+        _id: uuid,
+        tenantId: uuid,
+        voucherId: uuid,
+        redemptionId: uuid,
+        partnerId: uuid,
+        mediumId: nullableUuid,
+        ruleId: nullableUuid,
+        ruleVersion: { bsonType: ['int', 'null'] },
+        obligationType: { enum: ['TENANT_TO_COMPANY', 'COMPANY_TO_AFFILIATED_INDIVIDUAL', 'TENANT_TO_INDEPENDENT_INDIVIDUAL'] },
+        rate: decimalField,
+        baseAmount: decimalField,
+        amount: decimalField,
+        status: { enum: ['OPEN', 'PAID', 'VOID'] },
+        redeemedAt: date,
+        createdAt: date,
+        voidedAt: nullableDate,
+        voidedBy: nullableUuid,
+        voidReason: { bsonType: ['string', 'null'] },
+      },
+    },
+    indexes: [
+      { key: { redemptionId: 1, obligationType: 1 }, name: 'redemption_obligation_uq', unique: true },
+      { key: { tenantId: 1, partnerId: 1, status: 1 }, name: 'tenant_partner_status' },
+      { key: { partnerId: 1, redeemedAt: -1 }, name: 'partner_redeemed' },
     ],
   },
 
