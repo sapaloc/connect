@@ -1,9 +1,19 @@
 import { merchantSlug, partnerMediumType, ROLES } from '#domain';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { hashPassword } from '../auth/password.js';
+import { toDecimal128 } from './decimal.js';
 import { collection } from './mongo.js';
 
 /** @typedef {{ session?: import('mongodb').ClientSession }} TxOptions */
+
+export const RATE_FIELDS = /** @type {const} */ ([
+  'totalBudgetRate',
+  'customerDiscountRate',
+  'companyCommissionRate',
+  'individualShareRate',
+  'companyNetCommissionRate',
+  'individualCommissionRate',
+]);
 
 /**
  * @typedef {{ role: string, tenantId: string | null, partnerRelationshipId?: string | null, createdBy?: string | null }} RoleInput
@@ -85,6 +95,37 @@ export function newReferralMedium(partner, createdBy, replacesMediumId = null) {
 }
 
 /**
+ * Case- and spacing-insensitive partner name, unique per merchant.
+ * @param {string} name
+ */
+export function partnerNameKey(name) {
+  return name.normalize('NFC').toLocaleLowerCase('vi').replace(/\s+/g, ' ');
+}
+
+/**
+ * @param {import('#domain').CommercialRule} rule
+ * @param {{ tenantId: string, partnerId: string, version: number, createdBy: string | null, now: Date }} meta
+ */
+export function newCommercialRule(rule, { tenantId, partnerId, version, createdBy, now }) {
+  /** @type {Record<string, unknown>} */
+  const rates = {};
+  for (const field of RATE_FIELDS) rates[field] = rule[field] ? toDecimal128(/** @type {string} */ (rule[field])) : null;
+  return {
+    _id: randomUUID(),
+    tenantId,
+    partnerId,
+    version,
+    status: 'ACTIVE',
+    relationshipKind: rule.relationshipKind,
+    ...rates,
+    effectiveFrom: now,
+    supersededAt: null,
+    createdBy,
+    createdAt: now,
+  };
+}
+
+/**
  * A new ACTIVE merchant (tenant) document, operated by an organization of the same name.
  * @param {{ name: string, slug: string, contactEmail?: string | null, contactPhone?: string | null, address?: string | null }} input
  */
@@ -107,10 +148,10 @@ export function newTenant({ name, slug, contactEmail = null, contactPhone = null
 
 /**
  * Creates an ACTIVE account (or updates its password) and grants the role if missing.
- * @param {{ email: string, displayName: string, password: string, role: string, tenantId: string | null }} input
+ * @param {{ email: string, displayName: string, password: string, role: string, tenantId: string | null, partnerRelationshipId?: string | null }} input
  * @param {TxOptions} [options]
  */
-export async function ensureActiveUser({ email, displayName, password, role, tenantId }, options = {}) {
+export async function ensureActiveUser({ email, displayName, password, role, tenantId, partnerRelationshipId = null }, options = {}) {
   const users = await collection('users');
   const now = new Date();
   const user = await users.findOneAndUpdate(
@@ -122,6 +163,6 @@ export async function ensureActiveUser({ email, displayName, password, role, ten
     { ...options, upsert: true, returnDocument: 'after', projection: { _id: 1 } },
   );
   const userId = /** @type {string} */ (user?._id);
-  await grantRole(userId, { role, tenantId }, options);
+  await grantRole(userId, { role, tenantId, partnerRelationshipId }, options);
   return userId;
 }

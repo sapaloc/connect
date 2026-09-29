@@ -72,12 +72,13 @@ Health check: `GET /api/v1/health`.
 
 ```bash
 pnpm seed                 # local/test/uat (refused on production): Platform Admin, Tenant Admin, Manager, Staff,
-                          # multi-role user (emails in apps/api/src/db/seed-local.js, password = SEED_PASSWORD)
+                          # multi-role user, Partner Admin + Referrer with a sample partner each
+                          # (emails in apps/api/src/db/seed-local.js, password = SEED_PASSWORD)
 MONGODB_URI=<uat uri> pnpm user:create --email a@b.vn --name "Name" --role TENANT_ADMIN --tenant Number160
 ```
 
-`pnpm seed` only creates the accounts the first time; later runs skip, so passwords and roles changed during
-testing are kept. UAT runs it after `db:setup` on every deploy (password from the `UAT_SEED_PASSWORD` secret,
+`pnpm seed` only creates what is missing: accounts that already exist are skipped, so passwords and roles
+changed during testing are kept. The sample partners also set the merchant VAT rate (10%) if it is not set yet. UAT runs it after `db:setup` on every deploy (password from the `UAT_SEED_PASSWORD` secret,
 used only on that first run). Share the password privately, never in the repo.
 
 To start over with an empty database plus fresh test accounts (local/test/uat only, never production):

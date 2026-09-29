@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { actorOf, recordAudit } from '../audit/audit.js';
 import { authed } from '../auth/guard.js';
 import { fromDecimal128, toDecimal128 } from '../db/decimal.js';
-import { newReferralMedium } from '../db/bootstrap.js';
+import { newCommercialRule, newReferralMedium, partnerNameKey, RATE_FIELDS } from '../db/bootstrap.js';
 import { collection } from '../db/mongo.js';
 import { withTransaction } from '../db/tx.js';
 import { inviteMember, parsePerson } from '../foundation/user-routes.js';
@@ -14,23 +14,10 @@ import { merchantBrands, merchantNames, scopeFilter, UUID_PATTERN } from '../mer
 import { partnerStats } from './stats.js';
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const RATE_FIELDS = /** @type {const} */ ([
-  'totalBudgetRate',
-  'customerDiscountRate',
-  'companyCommissionRate',
-  'individualShareRate',
-  'companyNetCommissionRate',
-  'individualCommissionRate',
-]);
 
 /** @param {import('../http/router.js').Context} ctx */
 function sessionOf(ctx) {
   return /** @type {import('../auth/session.js').Session} */ (ctx.session);
-}
-
-/** @param {string} name */
-function nameKey(name) {
-  return name.normalize('NFC').toLocaleLowerCase('vi').replace(/\s+/g, ' ');
 }
 
 /**
@@ -131,29 +118,6 @@ function parseRule(relationshipKind, input) {
   return rule;
 }
 
-/**
- * @param {import('#domain').CommercialRule} rule
- * @param {{ tenantId: string, partnerId: string, version: number, createdBy: string, now: Date }} meta
- */
-function ruleDocument(rule, { tenantId, partnerId, version, createdBy, now }) {
-  /** @type {Record<string, unknown>} */
-  const rates = {};
-  for (const field of RATE_FIELDS) rates[field] = rule[field] ? toDecimal128(/** @type {string} */ (rule[field])) : null;
-  return {
-    _id: randomUUID(),
-    tenantId,
-    partnerId,
-    version,
-    status: 'ACTIVE',
-    relationshipKind: rule.relationshipKind,
-    ...rates,
-    effectiveFrom: now,
-    supersededAt: null,
-    createdBy,
-    createdAt: now,
-  };
-}
-
 /** @param {import('#domain').CommercialRule} rule */
 function rulePercents(rule) {
   return { totalBudgetRate: rule.totalBudgetRate, customerDiscountRate: rule.customerDiscountRate };
@@ -234,7 +198,7 @@ async function createPartner(req, res, ctx) {
     _id: randomUUID(),
     tenantId,
     name,
-    nameKey: nameKey(name),
+    nameKey: partnerNameKey(name),
     relationshipKind,
     partnerType,
     status: 'ACTIVE',
@@ -254,7 +218,7 @@ async function createPartner(req, res, ctx) {
       const partners = await collection('partners');
       await partners.insertOne(partner, { session: tx });
       const commercialRules = await collection('commercialRules');
-      const ruleDoc = ruleDocument(rule, { tenantId, partnerId: partner._id, version: 1, createdBy: session.userId, now });
+      const ruleDoc = newCommercialRule(rule, { tenantId, partnerId: partner._id, version: 1, createdBy: session.userId, now });
       await commercialRules.insertOne(ruleDoc, { session: tx });
       const referralMedia = await collection('referralMedia');
       await referralMedia.insertOne(newReferralMedium(partner, session.userId), { session: tx });
@@ -306,7 +270,7 @@ async function changeRule(req, res, ctx) {
       await commercialRules.updateOne({ _id: current._id, status: 'ACTIVE' }, { $set: { status: 'SUPERSEDED', supersededAt: now } }, { session: tx });
     }
     const version = (current?.version ?? 0) + 1;
-    await commercialRules.insertOne(ruleDocument(rule, { tenantId: found.tenantId, partnerId: found._id, version, createdBy: session.userId, now }), {
+    await commercialRules.insertOne(newCommercialRule(rule, { tenantId: found.tenantId, partnerId: found._id, version, createdBy: session.userId, now }), {
       session: tx,
     });
     await recordAudit(
