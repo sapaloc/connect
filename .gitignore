@@ -1,6 +1,8 @@
 node_modules/
 dist/
 .vercel/
+.storage*/
+backups/
 .env
 .env.*
 !.env.example

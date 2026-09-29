@@ -29,6 +29,21 @@ docker exec connect-mongo mongosh --eval 'rs.initiate()'
 (`apps/api/src/db/setup.js`). It is safe to re-run and runs on every UAT deploy. When a validator or index
 changes, bump `SCHEMA_VERSION` and keep old documents valid (add optional fields first, backfill, then require).
 
+## Backups
+
+Atlas Free has no backups, so Vercel Cron calls `GET /api/v1/internal/jobs/backup` every day at 02:00 Vietnam
+time (`vercel.json`, protected by `CRON_SECRET`). It exports every collection except sessions and rate limits as
+canonical Extended JSON (Decimal128, dates and binary kept exactly), gzipped, to the private Supabase Storage
+bucket `connect-files` under `backups/<APP_ENV>/`, and keeps the newest 30.
+
+```bash
+MONGODB_URI=<uat uri> APP_ENV=uat pnpm db:backup          # download a copy now into ./backups (gitignored)
+pnpm db:restore --file backups/<file>.json.gz --confirm local   # replace ALL data (local/test/uat only)
+```
+
+Download a daily file from Supabase → Storage → `connect-files` → `backups/uat`. Backups contain password
+hashes: keep them out of the repo and chat.
+
 ## Local development
 
 ```bash
@@ -81,5 +96,5 @@ pnpm test:permission      # only @permission tests
 `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`, `UAT_MONGODB_URI` (same value as `MONGODB_URI` on Vercel),
 `UAT_SEED_PASSWORD` (optional; test account password on UAT, must meet the password policy).
 
-Vercel env (Production): `MONGODB_URI` (from the Atlas integration), `MONGODB_DB=connect`, `SESSION_SECRET`,
+Vercel env (Production): `MONGODB_URI` (from the Atlas integration), `MONGODB_DB=connect`, `SESSION_SECRET`, `CRON_SECRET`,
 `APP_ENV=uat`, `APP_ORIGIN`, `MICROSITE_PUBLIC_BASE_URL`, `STORAGE_*` (Supabase Storage for files).
