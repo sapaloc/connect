@@ -134,7 +134,7 @@ body {
 
 .brand {
   font-family: Georgia, serif;
-  font-size: 22px;
+  font-size: 26px;
   letter-spacing: 0.08em;
   color: var(--sw-sidebar);
 }
@@ -705,9 +705,9 @@ a.brand:hover {
   margin: 0 auto;
   border-radius: 18px;
   overflow: hidden;
-  background: #f4efe9;
+  background: #fbf7ee;
   border: 1px solid var(--sw-line);
-  color: #17262d;
+  color: #1f2823;
 }
 
 .vcard-head {
@@ -766,7 +766,7 @@ a.brand:hover {
   margin: 0;
   font-size: 28px;
   font-weight: 700;
-  color: #c2410c;
+  color: #b8643f;
 }
 
 .vcard-qr {
@@ -793,7 +793,7 @@ a.brand:hover {
 .vcard-note {
   margin: 0;
   font-size: 13px;
-  color: #4b5563;
+  color: #3d4a41;
 }
 
 .vcard-off .vcard-qr img {

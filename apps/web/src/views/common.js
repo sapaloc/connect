@@ -32,7 +32,7 @@ export function authLayout({ title, subtitle = '', body, back }) {
     <main class="auth-shell">
       <section class="auth-card">
         <header class="d-flex justify-content-between align-items-center mb-4">
-          <a href="/" data-nav class="brand text-decoration-none">MYCONNECT</a>
+          <a href="/" data-nav class="brand text-decoration-none">SAPAWOO</a>
           ${langToggle()}
         </header>
         ${back ? backLink(back) : ''}

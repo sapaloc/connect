@@ -12,7 +12,7 @@ describe('brand colour', () => {
 
   it('picks the readable text colour', () => {
     assert.equal(brandTextColor('#17262D'), '#FFFFFF');
-    assert.equal(brandTextColor('#F6E7C1'), '#17262D');
+    assert.equal(brandTextColor('#F6E7C1'), '#1F2823');
     assert.ok(contrastRatio('#000000', '#FFFFFF') > 20);
   });
 

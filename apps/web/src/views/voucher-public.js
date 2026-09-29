@@ -14,7 +14,7 @@ export function publicLayout(body) {
     <main class="auth-shell">
       <section class="auth-card public-card">
         <header class="d-flex justify-content-between align-items-center mb-3">
-          <a href="/" data-nav class="brand text-decoration-none">MYCONNECT</a>
+          <a href="/" data-nav class="brand text-decoration-none">SAPAWOO</a>
           ${langToggle()}
         </header>
         ${body}

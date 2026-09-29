@@ -1,5 +1,5 @@
 /** Dark text on a light brand colour (Deep Ink, Technologies CI). */
-export const DARK_TEXT = '#17262D';
+export const DARK_TEXT = '#1F2823';
 export const LIGHT_TEXT = '#FFFFFF';
 /** WCAG AA for normal text. */
 export const MIN_CONTRAST = 4.5;
