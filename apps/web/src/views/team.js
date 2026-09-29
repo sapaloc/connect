@@ -11,43 +11,45 @@ import { messageSlot, showMessage } from './common.js';
 export function teamPanel(profile) {
   const roles = INVITABLE_ROLES[/** @type {keyof typeof INVITABLE_ROLES} */ (profile.activeRole?.role)] ?? [];
   return `
-    <section class="panel">
-      <h2 class="h5 mb-1">${esc(t('teamTitle'))}</h2>
-      <p class="text-muted mb-3">${esc(t('teamSubtitle'))}</p>
-      <form id="invite" class="row g-2 align-items-end" novalidate>
-        <div class="col-12 col-md-4">
+    <section class="card-sw">
+      <h2 class="card-title">${esc(t('inviteTitle'))}</h2>
+      <p class="text-muted small mb-3">${esc(t('teamSubtitle'))}</p>
+      <form id="invite" class="row g-3 align-items-end" novalidate>
+        <div class="col-12 col-md-6 col-xl-4">
           <label for="invite-email" class="form-label small">${esc(t('email'))}</label>
           <input id="invite-email" name="email" type="email" class="form-control" required />
         </div>
-        <div class="col-12 col-md-3">
+        <div class="col-12 col-md-6 col-xl-3">
           <label for="invite-name" class="form-label small">${esc(t('displayName'))}</label>
           <input id="invite-name" name="displayName" class="form-control" maxlength="120" required />
         </div>
-        <div class="col-6 col-md-2">
+        <div class="col-7 col-md-4 col-xl-2">
           <label for="invite-role" class="form-label small">${esc(t('role'))}</label>
           <select id="invite-role" name="role" class="form-select">
             ${roles.map((role) => `<option value="${role}">${esc(t(`role_${role}`))}</option>`).join('')}
           </select>
         </div>
-        <div class="col-6 col-md-1">
+        <div class="col-5 col-md-3 col-xl-1">
           <label for="invite-lang" class="form-label small">${esc(t('language'))}</label>
           <select id="invite-lang" name="preferredLanguage" class="form-select">
             <option value="en"${getLang() === 'en' ? ' selected' : ''}>EN</option>
             <option value="vi"${getLang() === 'vi' ? ' selected' : ''}>VI</option>
           </select>
         </div>
-        <div class="col-12 col-md-2 d-grid">
+        <div class="col-12 col-md-5 col-xl-2 d-grid">
           <button type="submit" class="btn btn-primary">${esc(t('inviteSend'))}</button>
         </div>
       </form>
       ${messageSlot('team-message')}
       <div id="link-box" class="link-box" hidden></div>
-      <div class="table-responsive mt-3">
-        <table class="table table-sm align-middle mb-0">
+    </section>
+    <section class="card-sw">
+      <h2 class="card-title">${esc(t('teamTitle'))}</h2>
+      <div class="table-responsive">
+        <table class="table tbl tbl-stack align-middle mb-0">
           <thead>
             <tr>
               <th>${esc(t('displayName'))}</th>
-              <th>${esc(t('email'))}</th>
               <th>${esc(t('role'))}</th>
               <th>${esc(t('status'))}</th>
               <th class="text-end">${esc(t('actions'))}</th>
@@ -93,11 +95,13 @@ export function mountTeam(app) {
           .map(
             (user) => `
         <tr>
-          <td>${esc(user.displayName)}</td>
-          <td>${esc(user.email)}</td>
-          <td>${user.roles.map((role) => esc(t(`role_${role}`))).join(', ')}</td>
-          <td><span class="status status-${esc(user.status.toLowerCase())}">${esc(t(`status_${user.status}`))}</span></td>
-          <td class="text-end">
+          <td>
+            <span class="d-block fw-semibold">${esc(user.displayName)}</span>
+            <span class="d-block small text-muted text-break">${esc(user.email)}</span>
+          </td>
+          <td data-label="${esc(t('role'))}">${user.roles.map((role) => esc(t(`role_${role}`))).join(', ')}</td>
+          <td data-label="${esc(t('status'))}"><span class="pill pill-${esc(user.status.toLowerCase())}">${esc(t(`status_${user.status}`))}</span></td>
+          <td class="text-md-end">
             ${
               user.status === 'INVITED'
                 ? `<button type="button" class="btn btn-sm btn-outline-secondary" data-resend="${esc(user.id)}">${esc(t('resendInvite'))}</button>`
@@ -109,7 +113,7 @@ export function mountTeam(app) {
         </tr>`,
           )
           .join('')
-      : `<tr><td colspan="5" class="text-muted">${esc(t('noUsers'))}</td></tr>`;
+      : `<tr><td colspan="4" class="text-muted">${esc(t('noUsers'))}</td></tr>`;
   };
 
   const load = async () => {

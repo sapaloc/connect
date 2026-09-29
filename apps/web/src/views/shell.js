@@ -1,80 +1,186 @@
 import { esc } from '../dom.js';
-import { t } from '../i18n.js';
-import { langToggle } from './common.js';
+import { getLang, t } from '../i18n.js';
+import { icon, navItem, visibleNav } from '../nav.js';
+import { getTheme } from '../theme.js';
 import { mountTeam, teamPanel } from './team.js';
 
 /** @typedef {import('../main.js').App} App */
+/** @typedef {import('../nav.js').NavItem} NavItem */
 
-const SURFACES = ['console', 'counter', 'my'];
+/** @param {string} name */
+function initials(name) {
+  return name
+    .split(/\s+/)
+    .filter((part) => /\p{L}/u.test(part))
+    .slice(-2)
+    .map((part) => part[0])
+    .join('')
+    .toUpperCase();
+}
 
 /**
- * Signed-in frame: only the surfaces this role may open are shown (permission by absence, §18.1).
+ * @param {NavItem} item
+ * @param {string} current
+ * @param {string} className
+ */
+function navLink(item, current, className) {
+  const active = item.path === current;
+  return `
+    <a href="${item.path}" data-nav class="${className}${active ? ' active' : ''}"${active ? ' aria-current="page"' : ''}>
+      ${icon(item.icon)}<span>${esc(t(item.label))}</span>
+    </a>`;
+}
+
+/**
+ * Signed-in frame, mobile first:
+ * phone = top bar + bottom tabs + drawer, tablet = icon rail, desktop = 232px sidebar.
  * @param {App} app
  * @param {string} current
- * @param {string} content
+ * @param {{ title: string, content: string }} page
  */
-function appLayout(app, current, content) {
+export function appLayout(app, current, { title, content }) {
   const profile = /** @type {import('../api.js').Profile} */ (app.state.profile);
   const role = /** @type {import('../api.js').RoleOption} */ (profile.activeRole);
-  const surfaces = SURFACES.filter((surface) => profile.permissions.includes(`surface.${surface}`));
+  const items = visibleNav(profile);
+  const surfaces = [...new Set(items.map((item) => item.surface))];
+  const roleLine = `${t(`role_${role.role}`)}${role.tenantName ? ` · ${role.tenantName}` : ''}`;
+  const otherLang = getLang() === 'en' ? 'vi' : 'en';
+  const dark = getTheme() === 'dark';
+
+  const sideNav = surfaces
+    .map(
+      (surface) => `
+        ${surfaces.length > 1 ? `<div class="sb-sec">${esc(t(`surface_${surface}`))}</div>` : ''}
+        ${items
+          .filter((item) => item.surface === surface)
+          .map((item) => navLink(item, current, 'sb-link'))
+          .join('')}`,
+    )
+    .join('');
+
   return `
-    <div class="app-shell">
-      <header class="topbar">
-        <span class="brand">CONNECT</span>
-        ${
-          surfaces.length > 1
-            ? `<nav class="topbar-nav">${surfaces
-                .map(
-                  (surface) =>
-                    `<a href="/${surface}" data-nav class="${surface === current ? 'active' : ''}">${esc(t(`surface_${surface}`))}</a>`,
-                )
-                .join('')}</nav>`
-            : ''
-        }
-        <div class="topbar-right">
-          <span class="who">
-            <span class="d-block fw-semibold">${esc(profile.user.displayName)}</span>
-            <span class="d-block small">${esc(t(`role_${role.role}`))}${role.tenantName ? ` · ${esc(role.tenantName)}` : ''}</span>
-          </span>
-          ${profile.roles.length > 1 ? `<a href="/select-role" data-nav class="btn btn-sm btn-outline-secondary">${esc(t('switchRole'))}</a>` : ''}
-          ${langToggle()}
-          <button type="button" class="btn btn-sm btn-outline-secondary" data-signout>${esc(t('signOut'))}</button>
+    <div class="app" id="app-frame">
+      <a class="skip-link" href="#main">${esc(t('skipToContent'))}</a>
+      <aside class="sb" id="sidebar" aria-label="${esc(t('menu'))}">
+        <div class="sb-head">
+          <span class="brand brand-on-dark">CONNECT</span>
+          <span class="brand-mark" aria-hidden="true">C</span>
+          <button type="button" class="icon-btn sb-close" data-drawer="close" aria-label="${esc(t('closeMenu'))}">${icon('close')}</button>
         </div>
-      </header>
-      <main class="app-main">${content}</main>
+        <nav class="sb-nav">${sideNav}</nav>
+        <div class="sb-foot">
+          <div class="sb-who" title="${esc(profile.user.email)}">
+            <span class="avatar" aria-hidden="true">${esc(initials(profile.user.displayName))}</span>
+            <span class="sb-who-text">
+              <span class="d-block fw-semibold text-truncate">${esc(profile.user.displayName)}</span>
+              <span class="d-block small text-truncate">${esc(roleLine)}</span>
+            </span>
+          </div>
+          <div class="sb-actions">
+            ${
+              profile.roles.length > 1
+                ? `<a href="/select-role" data-nav class="sb-action" title="${esc(t('switchRole'))}">${icon('swap')}<span>${esc(t('switchRole'))}</span></a>`
+                : ''
+            }
+            <button type="button" class="sb-action" data-lang="${otherLang}" title="${esc(t('language'))}">
+              ${icon('globe')}<span>${esc(t('language'))}: ${getLang().toUpperCase()}</span>
+            </button>
+            <button type="button" class="sb-action" data-theme aria-pressed="${dark}" title="${esc(t('darkTheme'))}">
+              ${icon('theme')}<span>${esc(t('darkTheme'))}</span>
+            </button>
+            <button type="button" class="sb-action" data-signout title="${esc(t('signOut'))}">
+              ${icon('logout')}<span>${esc(t('signOut'))}</span>
+            </button>
+          </div>
+        </div>
+      </aside>
+      <div class="sb-backdrop" data-drawer="close"></div>
+      <div class="app-body">
+        <header class="tb">
+          <button type="button" class="icon-btn tb-menu" data-drawer="open" aria-controls="sidebar" aria-expanded="false" aria-label="${esc(t('menu'))}">${icon('menu')}</button>
+          <h1 class="tb-title">${esc(title)}</h1>
+          <span class="tb-who">
+            <span class="d-block fw-semibold">${esc(profile.user.displayName)}</span>
+            <span class="d-block small">${esc(roleLine)}</span>
+          </span>
+        </header>
+        <main class="app-main" id="main" tabindex="-1">${content}</main>
+      </div>
+      ${
+        items.length > 1
+          ? `<nav class="bn" aria-label="${esc(t('menu'))}">${items.slice(0, 5).map((item) => navLink(item, current, 'bn-link')).join('')}</nav>`
+          : ''
+      }
     </div>`;
 }
 
 /**
  * @param {string} title
  * @param {string} text
+ * @param {import('../nav.js').IconName} [iconName]
  */
-function placeholder(title, text) {
+export function emptyState(title, text, iconName = 'home') {
   return `
-    <section class="panel">
-      <h1 class="h5 mb-2">${esc(title)}</h1>
-      <p class="text-muted mb-0">${esc(text)}</p>
-    </section>`;
+    <div class="empty">
+      <span class="empty-ico">${icon(iconName)}</span>
+      <p class="fw-semibold mb-1">${esc(title)}</p>
+      <p class="text-muted small mb-0">${esc(text)}</p>
+    </div>`;
+}
+
+/**
+ * @param {App} app
+ * @param {string} path
+ * @param {string} content
+ */
+function render(app, path, content) {
+  const item = navItem(path);
+  app.root.innerHTML = appLayout(app, path, { title: item ? t(item.label) : '', content });
 }
 
 /** @param {App} app */
 export function consoleView(app) {
   const profile = /** @type {import('../api.js').Profile} */ (app.state.profile);
-  const showTeam = profile.permissions.includes('user.invite') && Boolean(profile.activeRole?.tenantId);
-  app.root.innerHTML = appLayout(
+  const shortcuts = visibleNav(profile).filter((item) => item.path !== '/console');
+  render(
     app,
-    'console',
-    placeholder(t('workTitle'), t('workEmpty')) + (showTeam ? teamPanel(profile) : ''),
+    '/console',
+    `
+    <section class="page-head">
+      <p class="eyebrow">${esc(t('surface_console'))}</p>
+      <h2 class="h4 mb-0">${esc(t('hello', { name: profile.user.displayName }))}</h2>
+    </section>
+    <div class="grid-2">
+      <section class="card-sw">
+        <h3 class="card-title">${esc(t('workTitle'))}</h3>
+        ${emptyState(t('workNothing'), t('workEmpty'))}
+      </section>
+      ${
+        shortcuts.length
+          ? `<section class="card-sw">
+              <h3 class="card-title">${esc(t('shortcuts'))}</h3>
+              <div class="shortcut-list">
+                ${shortcuts.map((item) => `<a href="${item.path}" data-nav class="shortcut">${icon(item.icon)}<span>${esc(t(item.label))}</span></a>`).join('')}
+              </div>
+            </section>`
+          : ''
+      }
+    </div>`,
   );
-  if (showTeam) mountTeam(app);
+}
+
+/** @param {App} app */
+export function teamView(app) {
+  render(app, '/console/team', teamPanel(/** @type {import('../api.js').Profile} */ (app.state.profile)));
+  mountTeam(app);
 }
 
 /** @param {App} app */
 export function counterView(app) {
-  app.root.innerHTML = appLayout(app, 'counter', placeholder(t('counterTitle'), t('counterEmpty')));
+  render(app, '/counter', `<section class="card-sw">${emptyState(t('counterTitle'), t('counterEmpty'), 'scan')}</section>`);
 }
 
 /** @param {App} app */
 export function myView(app) {
-  app.root.innerHTML = appLayout(app, 'my', placeholder(t('myTitle'), t('myEmpty')));
+  render(app, '/my', `<section class="card-sw">${emptyState(t('myTitle'), t('myEmpty'), 'qr')}</section>`);
 }

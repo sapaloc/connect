@@ -1,63 +1,48 @@
 import assert from 'node:assert/strict';
-import { rm } from 'node:fs/promises';
+import { mkdtemp, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { after, before, describe, it } from 'node:test';
-import { env } from '../src/config/env.js';
-import { BACKUP_KEEP, backupPrefix, exportDatabase, restoreDatabase } from '../src/db/backup.js';
+import { BACKUP_KEEP, exportDatabase, restoreDatabase, writeBackup } from '../src/db/backup.js';
 import { collection, getDb } from '../src/db/mongo.js';
-import { getStorage } from '../src/storage/storage.js';
 import { Agent, resetDatabase, startServer } from './helpers.js';
 
 /** @type {Awaited<ReturnType<typeof startServer>>} */
 let server;
+/** @type {string} */
+let dir;
 
 before(async () => {
-  await rm(env.storage.endpoint, { recursive: true, force: true });
+  dir = await mkdtemp(join(tmpdir(), 'connect-backup-'));
   await resetDatabase();
   server = await startServer();
 });
 
 after(async () => {
   await server?.close();
-  await rm(env.storage.endpoint, { recursive: true, force: true });
+  await rm(dir, { recursive: true, force: true });
 });
 
-/** @param {string} [authorization] */
-function runJob(authorization) {
-  return fetch(`${server.baseUrl}/api/v1/internal/jobs/backup`, {
-    headers: authorization ? { authorization } : {},
-  });
-}
-
 describe('database backup', () => {
-  it('the job refuses callers without the cron secret', async () => {
-    assert.equal((await runJob()).status, 401);
-    assert.equal((await runJob('Bearer wrong-secret')).status, 401);
-    assert.equal((await runJob(env.cronSecret)).status, 401);
+  it('writes a private backup file without sessions', async () => {
+    const result = await writeBackup(await getDb(), dir);
+    assert.match(result.file, /connect-test-.+\.json\.gz$/);
+    assert.equal(result.counts.users, 5);
+    assert.equal(result.counts.sessions, undefined, 'sessions are not backed up');
+    assert.equal((await stat(result.file)).mode & 0o777, 0o600, 'only the owner can read it');
   });
 
-  it('the job uploads a backup to private storage and records it', async () => {
-    const res = await runJob(`Bearer ${env.cronSecret}`);
-    assert.equal(res.status, 200);
-    const body = await res.json();
-    assert.match(body.path, /^backups\/test\/connect-test-.+\.json\.gz$/);
-    assert.equal(body.counts.users, 5);
-    assert.equal(body.counts.sessions, undefined, 'sessions are not backed up');
-    assert.deepEqual(await getStorage().list(backupPrefix()), [body.path]);
-    const audit = await (await collection('auditEvents')).findOne({ eventType: 'DATABASE_BACKUP_CREATED' });
-    assert.equal(audit?.entityId, body.path);
-  });
-
-  it(`keeps only the newest ${BACKUP_KEEP} backups`, async () => {
-    const storage = getStorage();
+  it(`keeps only the newest ${BACKUP_KEEP} backups of this environment`, async () => {
     for (let day = 1; day <= BACKUP_KEEP + 2; day += 1) {
-      await storage.put(`${backupPrefix()}connect-test-2020-01-${String(day).padStart(2, '0')}.json.gz`, Buffer.from('old'), 'application/gzip');
+      await writeFile(join(dir, `connect-test-2020-01-${String(day).padStart(2, '0')}.json.gz`), 'old');
     }
-    const res = await runJob(`Bearer ${env.cronSecret}`);
-    const { path } = await res.json();
-    const files = await storage.list(backupPrefix());
-    assert.equal(files.length, BACKUP_KEEP);
-    assert.ok(files.includes(path), 'the new backup is kept');
-    assert.ok(!files.includes(`${backupPrefix()}connect-test-2020-01-01.json.gz`), 'the oldest is removed');
+    await writeFile(join(dir, 'connect-uat-2020-01-01.json.gz'), 'other env');
+    const { file } = await writeBackup(await getDb(), dir);
+    const files = await readdir(dir);
+    assert.equal(files.filter((name) => name.startsWith('connect-test-')).length, BACKUP_KEEP);
+    assert.ok(files.includes(file.split('/').pop() ?? ''), 'the new backup is kept');
+    assert.ok(!files.includes('connect-test-2020-01-01.json.gz'), 'the oldest is removed');
+    assert.ok(files.includes('connect-uat-2020-01-01.json.gz'), 'other environments are left alone');
   });
 
   it('restore brings back every document with its exact types', async () => {

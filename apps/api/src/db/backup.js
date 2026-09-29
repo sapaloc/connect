@@ -1,7 +1,8 @@
 import { BSON } from 'mongodb';
+import { mkdir, readdir, rm, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { gunzipSync, gzipSync } from 'node:zlib';
 import { env } from '../config/env.js';
-import { getStorage } from '../storage/storage.js';
 import { COLLECTIONS } from './mongo.js';
 import { setup } from './setup.js';
 
@@ -11,7 +12,6 @@ const { EJSON } = BSON;
 const SKIPPED = new Set([COLLECTIONS.sessions, COLLECTIONS.rateLimits]);
 
 export const BACKUP_KEEP = 30;
-export const backupPrefix = () => `backups/${env.appEnv}/`;
 
 /**
  * Every collection as canonical Extended JSON (keeps Decimal128, dates, binary exactly), gzipped.
@@ -56,16 +56,19 @@ export async function restoreDatabase(db, body) {
 }
 
 /**
- * Uploads today's backup to private storage and keeps only the newest BACKUP_KEEP files.
+ * Writes a backup file into `dir` and keeps only the newest `keep` backups of this APP_ENV there.
  * @param {import('mongodb').Db} db
+ * @param {string} dir
+ * @param {number} [keep]
  */
-export async function runBackupJob(db) {
-  const storage = getStorage();
+export async function writeBackup(db, dir, keep = BACKUP_KEEP) {
   const backup = await exportDatabase(db);
-  const path = `${backupPrefix()}${backup.fileName}`;
-  await storage.put(path, backup.body, 'application/gzip');
-  const existing = (await storage.list(backupPrefix())).filter((file) => file.endsWith('.json.gz')).sort();
-  const expired = existing.slice(0, Math.max(0, existing.length - BACKUP_KEEP));
-  await storage.remove(expired);
-  return { path, bytes: backup.body.length, counts: backup.counts, removed: expired.length };
+  await mkdir(dir, { recursive: true });
+  const file = join(dir, backup.fileName);
+  await writeFile(file, backup.body, { mode: 0o600 });
+  const prefix = `connect-${env.appEnv}-`;
+  const existing = (await readdir(dir)).filter((name) => name.startsWith(prefix) && name.endsWith('.json.gz')).sort();
+  const expired = existing.slice(0, Math.max(0, existing.length - keep));
+  await Promise.all(expired.map((name) => rm(join(dir, name), { force: true })));
+  return { file, bytes: backup.body.length, counts: backup.counts, removed: expired.length };
 }
