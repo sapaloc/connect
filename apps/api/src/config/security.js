@@ -32,6 +32,7 @@ export const RATE_LIMITS = Object.freeze({
   resetRequestEmail: { max: 3, windowMs: HOUR },
   resetRequestIp: { max: 10, windowMs: HOUR },
   tokenIp: { max: 10, windowMs: 15 * MINUTE },
+  publicVoucherIp: { max: 60, windowMs: 15 * MINUTE },
 });
 
 /** scrypt cost: ~50 ms and 32 MiB per hash on a Vercel function. */

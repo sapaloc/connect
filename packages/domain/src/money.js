@@ -189,6 +189,57 @@ export function calculateRedemption({ grossInvoiceAmount, vatRate, rule, hasAffi
   };
 }
 
+export const DISCOUNT_TYPES = Object.freeze({
+  PERCENT: 'PERCENT',
+  AMOUNT: 'AMOUNT',
+});
+
+/**
+ * Discount of a merchant-issued (DIRECT) voucher, as stored: PERCENT is typed as a percent with at most
+ * 2 decimals ("12.5") and stored as a rate ("0.1250"); AMOUNT is a VND amount ("200000.0000").
+ * @param {unknown} discountType
+ * @param {unknown} value
+ */
+export function parseDirectDiscount(discountType, value) {
+  if (discountType === DISCOUNT_TYPES.PERCENT) {
+    const percent = parseDecimal(value, 'discountValue');
+    if (percent.lte(0) || percent.gt(100) || percent.decimalPlaces() > 2) {
+      throw new MoneyError('DISCOUNT_INVALID', 'discountValue must be a percent above 0 and at most 100', 'discountValue');
+    }
+    return text(percent.div(100));
+  }
+  if (discountType === DISCOUNT_TYPES.AMOUNT) {
+    const amount = parseDecimal(value, 'discountValue');
+    if (amount.lte(0)) throw new MoneyError('DISCOUNT_INVALID', 'discountValue must be greater than 0', 'discountValue');
+    return text(amount);
+  }
+  throw new MoneyError('DISCOUNT_TYPE_INVALID', 'discountType must be PERCENT or AMOUNT', 'discountType');
+}
+
+/**
+ * Bill of a DIRECT voucher redemption. PERCENT: bill x rate, stored half-up to 4 decimals.
+ * AMOUNT: the fixed amount, capped at the bill so the customer never pays less than 0.
+ * @param {{ discountType: string, discountValue: string, minBillAmount?: string | null, grossAmount: unknown }} input
+ */
+export function calculateDirectRedemption({ discountType, discountValue, minBillAmount = null, grossAmount }) {
+  const gross = parseDecimal(grossAmount, 'grossAmount');
+  if (gross.lte(0)) throw new MoneyError('AMOUNT_NOT_POSITIVE', 'grossAmount must be greater than 0', 'grossAmount');
+  if (minBillAmount && gross.lt(minBillAmount)) {
+    throw new MoneyError('BELOW_MIN_BILL', 'grossAmount is below the minimum bill of this voucher', 'grossAmount');
+  }
+  const value = new D(discountValue);
+  const discount = discountType === DISCOUNT_TYPES.PERCENT ? stored(gross.times(value)) : D.min(value, gross);
+  return { grossAmount: text(gross), discountAmount: text(discount), payableAmount: text(gross.minus(discount)) };
+}
+
+/**
+ * Stored rate as a percent for display: "0.1250" -> "12.5".
+ * @param {string} rate
+ */
+export function ratePercent(rate) {
+  return new D(rate).times(100).toDecimalPlaces(2, D.ROUND_HALF_UP).toString();
+}
+
 /**
  * Whole VND, half-up. For display only; never store or add displayed values.
  * @param {string} amount

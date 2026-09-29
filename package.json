@@ -29,7 +29,8 @@
   "dependencies": {
     "bootstrap": "^5.3.3",
     "decimal.js": "^10.6.0",
-    "mongodb": "^7.6.0"
+    "mongodb": "^7.6.0",
+    "qrcode": "^1.5.4"
   },
   "devDependencies": {
     "vite": "^6.0.0"

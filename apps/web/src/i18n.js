@@ -1,3 +1,5 @@
+import { toVnd } from '#domain';
+
 const messages = {
   vi: {
     signInTitle: 'Đăng nhập',
@@ -103,6 +105,54 @@ const messages = {
     resume: 'Mở lại',
     pauseConfirm: 'Tạm dừng {name}? Người dùng của merchant này không đăng nhập được cho tới khi mở lại.',
     noMerchants: 'Chưa có merchant.',
+    nav_vouchers: 'Voucher',
+    voucherCreateTitle: 'Tạo voucher',
+    voucherCreateSubtitle: 'Tạo một voucher cho một khách, hoặc một lô để phát cho nhiều người. Khách đưa QR tại quầy để dùng.',
+    discountPercent: 'Giảm %',
+    discountAmount: 'Giảm tiền (₫)',
+    discountValue: 'Mức giảm',
+    minBill: 'Bill tối thiểu (₫)',
+    validUntil: 'Dùng tới hết ngày',
+    expiry: 'Hạn dùng',
+    quantity: 'Số lượng',
+    customerName: 'Tên khách',
+    note: 'Ghi chú nội bộ',
+    voucherCreate: 'Tạo voucher',
+    vouchersCreated: 'Đã tạo {count} voucher.',
+    voucherListTitle: 'Danh sách voucher',
+    voucherSearch: 'Tìm mã hoặc tên khách',
+    allStatuses: 'Tất cả trạng thái',
+    allMerchants: 'Tất cả merchant',
+    code: 'Mã',
+    discount: 'Giảm',
+    merchant: 'Merchant',
+    vstatus_ACTIVE: 'Còn hiệu lực',
+    vstatus_REDEEMED: 'Đã dùng',
+    vstatus_EXPIRED: 'Hết hạn',
+    vstatus_VOID: 'Đã huỷ',
+    view: 'Xem',
+    voidAction: 'Huỷ',
+    voidPrompt: 'Lý do huỷ voucher {code}:',
+    share: 'Chia sẻ',
+    downloadImage: 'Tải ảnh',
+    copyLink: 'Copy link',
+    downloadCsv: 'Tải CSV',
+    imageDownloaded: 'Đã tải ảnh và copy link.',
+    close: 'Đóng',
+    noVouchers: 'Chưa có voucher.',
+    listLimited: 'Hiển thị {limit} voucher mới nhất. Dùng ô tìm kiếm để lọc.',
+    minBillShort: 'Bill từ {amount}',
+    validUntilShort: 'HSD {date}',
+    voucherTitle: 'Voucher',
+    percentOff: 'Giảm {value}%',
+    amountOff: 'Giảm {amount}',
+    showAtCounter: 'Đưa mã QR này cho nhân viên quầy khi thanh toán.',
+    vnote_REDEEMED: 'Voucher này đã được sử dụng.',
+    vnote_EXPIRED: 'Voucher này đã hết hạn.',
+    vnote_VOID: 'Voucher này đã bị huỷ.',
+    redeemedOn: 'Đã dùng lúc {date}',
+    err_VOUCHER_NOT_FOUND: 'Không tìm thấy voucher với mã này.',
+    err_VOUCHER_NOT_ACTIVE: 'Voucher không còn hiệu lực.',
     teamTitle: 'Nhóm',
     teamSubtitle: 'Mời người dùng và cấp link đặt lại mật khẩu.',
     displayName: 'Tên hiển thị',
@@ -230,6 +280,54 @@ const messages = {
     resume: 'Resume',
     pauseConfirm: 'Pause {name}? Its people cannot sign in until you resume it.',
     noMerchants: 'No merchants yet.',
+    nav_vouchers: 'Vouchers',
+    voucherCreateTitle: 'Issue vouchers',
+    voucherCreateSubtitle: 'Issue one voucher for one customer, or a batch to hand out. The customer shows the QR at the counter.',
+    discountPercent: 'Percent off',
+    discountAmount: 'Amount off (₫)',
+    discountValue: 'Discount',
+    minBill: 'Minimum bill (₫)',
+    validUntil: 'Valid until end of',
+    expiry: 'Expiry',
+    quantity: 'Quantity',
+    customerName: 'Customer name',
+    note: 'Internal note',
+    voucherCreate: 'Issue vouchers',
+    vouchersCreated: '{count} voucher(s) issued.',
+    voucherListTitle: 'Vouchers',
+    voucherSearch: 'Search code or customer',
+    allStatuses: 'All statuses',
+    allMerchants: 'All merchants',
+    code: 'Code',
+    discount: 'Discount',
+    merchant: 'Merchant',
+    vstatus_ACTIVE: 'Active',
+    vstatus_REDEEMED: 'Redeemed',
+    vstatus_EXPIRED: 'Expired',
+    vstatus_VOID: 'Void',
+    view: 'View',
+    voidAction: 'Void',
+    voidPrompt: 'Reason for voiding voucher {code}:',
+    share: 'Share',
+    downloadImage: 'Download image',
+    copyLink: 'Copy link',
+    downloadCsv: 'Download CSV',
+    imageDownloaded: 'Image downloaded and link copied.',
+    close: 'Close',
+    noVouchers: 'No vouchers yet.',
+    listLimited: 'Showing the latest {limit} vouchers. Use search to filter.',
+    minBillShort: 'Bill from {amount}',
+    validUntilShort: 'Valid until {date}',
+    voucherTitle: 'Voucher',
+    percentOff: '{value}% off',
+    amountOff: '{amount} off',
+    showAtCounter: 'Show this QR code to the counter staff when you pay.',
+    vnote_REDEEMED: 'This voucher has been used.',
+    vnote_EXPIRED: 'This voucher has expired.',
+    vnote_VOID: 'This voucher was cancelled.',
+    redeemedOn: 'Used on {date}',
+    err_VOUCHER_NOT_FOUND: 'No voucher found with this code.',
+    err_VOUCHER_NOT_ACTIVE: 'This voucher is no longer valid.',
     teamTitle: 'Team',
     teamSubtitle: 'Invite people and issue password reset links.',
     displayName: 'Display name',
@@ -285,6 +383,23 @@ export function errorText(error) {
   const key = `err_${code}`;
   const known = key in messages.en;
   return t(known ? key : 'err_UNKNOWN', { minutes: Math.max(1, Math.ceil(retryAfter / 60)) });
+}
+
+/** @param {string | Date} value */
+export function formatDate(value) {
+  return new Intl.DateTimeFormat(getLang() === 'vi' ? 'vi-VN' : 'en-GB', { dateStyle: 'short', timeZone: 'Asia/Ho_Chi_Minh' }).format(
+    new Date(value),
+  );
+}
+
+/**
+ * Whole VND for display ("1.250.000 ₫"); amounts stay 4-decimal strings everywhere else.
+ * @param {string} amount
+ */
+export function formatVnd(amount) {
+  return new Intl.NumberFormat(getLang() === 'vi' ? 'vi-VN' : 'en-US', { style: 'currency', currency: 'VND', maximumFractionDigits: 0 }).format(
+    Number(toVnd(amount)),
+  );
 }
 
 /** @param {string | Date} value */

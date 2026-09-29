@@ -1,13 +1,14 @@
 import { merchantSlug } from '#domain';
 import { pathToFileURL } from 'node:url';
 import { env, requireEnv } from '../config/env.js';
+import { decimalField } from './decimal.js';
 import { closeClient, COLLECTIONS, getDb } from './mongo.js';
 
 /**
  * Bump when a validator or index changes. Changes must keep old documents valid
  * (add optional fields; backfill in a script before making a field required).
  */
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 const DAY_SECONDS = 24 * 60 * 60;
 const uuid = { bsonType: 'string', pattern: '^[0-9a-f-]{36}$' };
@@ -204,6 +205,55 @@ const DEFINITIONS = {
     indexes: [
       { key: { tenantId: 1, createdAt: -1 }, name: 'tenant_created' },
       { key: { entityType: 1, entityId: 1 }, name: 'entity' },
+    ],
+  },
+
+  // No additionalProperties: false, so the REFERRAL channel (Đợt B) can add fields without collMod.
+  [COLLECTIONS.vouchers]: {
+    schema: {
+      bsonType: 'object',
+      required: ['_id', 'tenantId', 'code', 'source', 'status', 'discountType', 'discountValue', 'validUntil', 'createdBy', 'createdAt'],
+      properties: {
+        _id: uuid,
+        tenantId: uuid,
+        code: { bsonType: 'string', pattern: '^[A-HJ-NP-Z2-9]{8}$' },
+        source: { enum: ['DIRECT', 'REFERRAL'] },
+        status: { enum: ['ACTIVE', 'REDEEMED', 'EXPIRED', 'VOID'] },
+        discountType: { enum: ['PERCENT', 'AMOUNT'] },
+        discountValue: decimalField,
+        minBillAmount: { bsonType: ['decimal', 'null'] },
+        validUntil: date,
+        customerName: { bsonType: ['string', 'null'] },
+        note: { bsonType: ['string', 'null'] },
+        batchId: nullableUuid,
+        createdBy: uuid,
+        createdAt: date,
+        redemption: {
+          bsonType: ['object', 'null'],
+          required: ['grossAmount', 'discountAmount', 'payableAmount', 'redeemedBy', 'redeemedAt'],
+          properties: {
+            grossAmount: decimalField,
+            discountAmount: decimalField,
+            payableAmount: decimalField,
+            redeemedBy: uuid,
+            roleAssignmentId: nullableUuid,
+            redeemedAt: date,
+          },
+        },
+        voidedAt: nullableDate,
+        voidedBy: nullableUuid,
+        voidReason: { bsonType: ['string', 'null'] },
+      },
+      anyOf: [
+        { properties: { status: { enum: ['ACTIVE', 'EXPIRED', 'VOID'] } } },
+        { properties: { status: { enum: ['REDEEMED'] }, redemption: { bsonType: 'object' } }, required: ['redemption'] },
+      ],
+    },
+    indexes: [
+      { key: { code: 1 }, name: 'code_uq', unique: true },
+      { key: { tenantId: 1, createdAt: -1 }, name: 'tenant_created' },
+      { key: { tenantId: 1, status: 1, validUntil: 1 }, name: 'tenant_status' },
+      { key: { batchId: 1 }, name: 'batch', partialFilterExpression: { batchId: { $type: 'string' } } },
     ],
   },
 
