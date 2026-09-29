@@ -1,6 +1,7 @@
 import { merchantSlug } from '#domain';
 import { pathToFileURL } from 'node:url';
 import { env, requireEnv } from '../config/env.js';
+import { newReferralMedium } from './bootstrap.js';
 import { decimalField } from './decimal.js';
 import { closeClient, COLLECTIONS, getDb } from './mongo.js';
 
@@ -8,7 +9,7 @@ import { closeClient, COLLECTIONS, getDb } from './mongo.js';
  * Bump when a validator or index changes. Changes must keep old documents valid
  * (add optional fields; backfill in a script before making a field required).
  */
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 
 const DAY_SECONDS = 24 * 60 * 60;
 const uuid = { bsonType: 'string', pattern: '^[0-9a-f-]{36}$' };
@@ -254,6 +255,8 @@ const DEFINITIONS = {
       { key: { tenantId: 1, createdAt: -1 }, name: 'tenant_created' },
       { key: { tenantId: 1, status: 1, validUntil: 1 }, name: 'tenant_status' },
       { key: { batchId: 1 }, name: 'batch', partialFilterExpression: { batchId: { $type: 'string' } } },
+      { key: { mediumId: 1, browserContextId: 1, status: 1 }, name: 'referral_browser', partialFilterExpression: { source: 'REFERRAL' } },
+      { key: { partnerId: 1, createdAt: -1 }, name: 'referral_partner', partialFilterExpression: { source: 'REFERRAL' } },
     ],
   },
 
@@ -320,6 +323,57 @@ const DEFINITIONS = {
     ],
   },
 
+  // Partner QR (plan §9.4). A replaced QR stops working; its visits and vouchers stay.
+  [COLLECTIONS.referralMedia]: {
+    schema: {
+      bsonType: 'object',
+      required: ['_id', 'tenantId', 'partnerId', 'mediumType', 'publicToken', 'status', 'createdBy', 'createdAt'],
+      properties: {
+        _id: uuid,
+        tenantId: uuid,
+        partnerId: uuid,
+        mediumType: { enum: ['COMPANY_QR', 'LOCATION_QR', 'PERSONAL_DIGITAL_QR'] },
+        publicToken: { bsonType: 'string', pattern: '^[A-Za-z0-9_-]{22}$' },
+        status: { enum: ['ACTIVE', 'PAUSED', 'BLOCKED', 'REPLACED'] },
+        replacesMediumId: nullableUuid,
+        replacedAt: nullableDate,
+        replacedBy: nullableUuid,
+        replaceReason: { bsonType: ['string', 'null'] },
+        lastActivationAt: nullableDate,
+        createdBy: uuid,
+        createdAt: date,
+      },
+    },
+    indexes: [
+      { key: { publicToken: 1 }, name: 'public_token_uq', unique: true },
+      { key: { partnerId: 1 }, name: 'partner_active_uq', unique: true, partialFilterExpression: { status: 'ACTIVE' } },
+      { key: { tenantId: 1, partnerId: 1 }, name: 'tenant_partner' },
+    ],
+  },
+
+  // Every open of a partner link, for "Referral link opens" (plan J11). No personal data.
+  [COLLECTIONS.referralVisits]: {
+    schema: {
+      bsonType: 'object',
+      required: ['_id', 'publicToken', 'result', 'visitedAt'],
+      properties: {
+        _id: uuid,
+        publicToken: text,
+        tenantId: nullableUuid,
+        partnerId: nullableUuid,
+        mediumId: nullableUuid,
+        browserContextId: nullableUuid,
+        result: { enum: ['VALID', 'MEDIUM_INACTIVE', 'PARTNER_INACTIVE', 'NOT_FOUND'] },
+        language: { bsonType: ['string', 'null'] },
+        visitedAt: date,
+      },
+    },
+    indexes: [
+      { key: { tenantId: 1, partnerId: 1, visitedAt: -1 }, name: 'tenant_partner_visited' },
+      { key: { mediumId: 1, browserContextId: 1, visitedAt: -1 }, name: 'medium_browser' },
+    ],
+  },
+
   [COLLECTIONS.schemaVersions]: {
     schema: { bsonType: 'object', required: ['_id', 'appliedAt'], properties: { _id: { bsonType: 'int' }, appliedAt: date } },
     indexes: [],
@@ -337,6 +391,14 @@ async function backfill(db) {
     let slug = base;
     for (let n = 2; await tenants.countDocuments({ slug }, { limit: 1 }); n++) slug = `${base}-${n}`;
     await tenants.updateOne({ _id: tenant._id, slug: { $exists: false } }, { $set: { slug } });
+  }
+
+  const partners = db.collection(COLLECTIONS.partners);
+  const media = db.collection(COLLECTIONS.referralMedia);
+  const withQr = new Set(await media.distinct('partnerId', { status: { $in: ['ACTIVE', 'PAUSED'] } }));
+  for (const partner of await partners.find({ status: { $in: ['ACTIVE', 'PAUSED'] } }).toArray()) {
+    if (withQr.has(partner._id)) continue;
+    await media.insertOne(newReferralMedium(partner, partner.createdBy));
   }
 }
 

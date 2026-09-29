@@ -66,7 +66,7 @@ function newCode() {
 }
 
 /** @param {number} count */
-function newCodes(count) {
+export function newCodes(count) {
   const codes = new Set();
   while (codes.size < count) codes.add(newCode());
   return [...codes];
@@ -116,7 +116,7 @@ function voucherView(voucher, now, merchantNames) {
  * @param {string} merchantName
  * @param {Date} now
  */
-function publicView(voucher, merchantName, now) {
+export function publicView(voucher, merchantName, now) {
   return {
     code: voucher.code,
     merchantName,
@@ -359,6 +359,9 @@ async function redeemVoucher(req, res, ctx) {
     if (!voucher) throw new HttpError(404, 'VOUCHER_NOT_FOUND', 'Voucher not found');
     const status = effectiveVoucherStatus(voucher.status, voucher.validUntil, now);
     if (status !== 'ACTIVE') throw notRedeemable(status, voucher);
+    if (voucher.source !== 'DIRECT') {
+      throw new HttpError(409, 'REFERRAL_REDEEM_UNAVAILABLE', 'Partner vouchers cannot be redeemed until commission is enabled');
+    }
 
     let amounts;
     try {

@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { actorOf, recordAudit } from '../audit/audit.js';
 import { authed } from '../auth/guard.js';
 import { fromDecimal128, toDecimal128 } from '../db/decimal.js';
+import { newReferralMedium } from '../db/bootstrap.js';
 import { collection } from '../db/mongo.js';
 import { withTransaction } from '../db/tx.js';
 import { inviteMember, parsePerson } from '../foundation/user-routes.js';
@@ -51,9 +52,10 @@ function ruleView(rule) {
 
 /**
  * @param {any} partner
- * @param {{ rules: Map<string, any>, accounts: Map<string, any[]>, names: Map<string, string> }} related
+ * @param {{ rules: Map<string, any>, accounts: Map<string, any[]>, names: Map<string, string>, media: Map<string, any> }} related
  */
-function partnerView(partner, { rules, accounts, names }) {
+function partnerView(partner, { rules, accounts, names, media }) {
+  const medium = partner.status === 'ENDED' ? null : media.get(partner._id);
   return {
     id: partner._id,
     merchantId: partner.tenantId,
@@ -70,11 +72,12 @@ function partnerView(partner, { rules, accounts, names }) {
     endReason: partner.endReason ?? null,
     rule: ruleView(rules.get(partner._id)),
     accounts: accounts.get(partner._id) ?? [],
+    qr: medium ? { token: medium.publicToken, createdAt: medium.createdAt.toISOString() } : null,
   };
 }
 
 /**
- * Active rules and MyConnect accounts of the given partners.
+ * Active rules, QR and MyConnect accounts of the given partners.
  * @param {any[]} partners
  */
 async function related(partners) {
@@ -82,6 +85,10 @@ async function related(partners) {
   const commercialRules = await collection('commercialRules');
   const rules = new Map(
     (await commercialRules.find({ partnerId: { $in: ids }, status: 'ACTIVE' }).toArray()).map((rule) => [rule.partnerId, rule]),
+  );
+  const referralMedia = await collection('referralMedia');
+  const media = new Map(
+    (await referralMedia.find({ partnerId: { $in: ids }, status: 'ACTIVE' }).toArray()).map((medium) => [medium.partnerId, medium]),
   );
   const users = await collection('users');
   const holders = await users
@@ -101,7 +108,7 @@ async function related(partners) {
     }
   }
   const names = await merchantNames(partners.map((partner) => partner.tenantId));
-  return { rules, accounts, names };
+  return { rules, accounts, names, media };
 }
 
 /**
@@ -183,8 +190,8 @@ async function listPartners(req, res, ctx) {
 }
 
 /**
- * Creates an ACTIVE partner with its first commercial rule and, when `account` is given, invites its
- * MyConnect account in the same transaction.
+ * Creates an ACTIVE partner with its first commercial rule and QR and, when `account` is given, invites
+ * its MyConnect account in the same transaction.
  * @type {import('../http/router.js').Handler}
  */
 async function createPartner(req, res, ctx) {
@@ -238,6 +245,8 @@ async function createPartner(req, res, ctx) {
       const commercialRules = await collection('commercialRules');
       const ruleDoc = ruleDocument(rule, { tenantId, partnerId: partner._id, version: 1, createdBy: session.userId, now });
       await commercialRules.insertOne(ruleDoc, { session: tx });
+      const referralMedia = await collection('referralMedia');
+      await referralMedia.insertOne(newReferralMedium(partner, session.userId), { session: tx });
       await recordAudit(
         {
           ...actorOf(ctx),
@@ -371,11 +380,43 @@ async function invitePartnerAccount(req, res, ctx) {
   sendJson(res, 201, result);
 }
 
+/**
+ * New QR for a lost or leaked one: the old link stops at once. Vouchers already activated stay valid.
+ * @type {import('../http/router.js').Handler}
+ */
+async function replaceQr(req, res, ctx) {
+  const session = sessionOf(ctx);
+  const reason = optionalText(await readJson(req), 'reason', 300);
+  const partner = await withTransaction(async (tx) => {
+    const found = await ownPartner(ctx, tx);
+    refuseEnded(found);
+    const referralMedia = await collection('referralMedia');
+    const current = await referralMedia.findOne({ partnerId: found._id, status: 'ACTIVE' }, { session: tx });
+    const now = new Date();
+    if (current) {
+      await referralMedia.updateOne(
+        { _id: current._id, status: 'ACTIVE' },
+        { $set: { status: 'REPLACED', replacedAt: now, replacedBy: session.userId, replaceReason: reason } },
+        { session: tx },
+      );
+    }
+    const medium = newReferralMedium(found, session.userId, current?._id ?? null);
+    await referralMedia.insertOne(medium, { session: tx });
+    await recordAudit(
+      { ...actorOf(ctx), eventType: 'REFERRAL_QR_REPLACED', entityType: 'referral_medium', entityId: medium._id, before: current ? { id: current._id } : null, after: { id: medium._id }, reason },
+      { session: tx },
+    );
+    return found;
+  });
+  sendJson(res, 200, { partner: partnerView(partner, await related([partner])) });
+}
+
 /** @type {import('../http/router.js').RouteDef[]} */
 export const partnerRoutes = [
   { method: 'GET', path: '/api/v1/partners', handler: authed(listPartners, { permission: 'partner.list' }) },
   { method: 'POST', path: '/api/v1/partners', handler: authed(createPartner, { permission: 'partner.manage' }) },
   { method: 'POST', path: '/api/v1/partners/:id/rule', handler: authed(changeRule, { permission: 'commercial_rule.manage' }) },
   { method: 'POST', path: '/api/v1/partners/:id/status', handler: authed(setPartnerStatus, { permission: 'partner.manage' }) },
+  { method: 'POST', path: '/api/v1/partners/:id/qr/replace', handler: authed(replaceQr, { permission: 'partner.manage' }) },
   { method: 'POST', path: '/api/v1/partners/:id/invitations', handler: authed(invitePartnerAccount, { permission: 'partner.manage' }) },
 ];

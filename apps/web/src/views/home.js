@@ -24,5 +24,9 @@ export function homeView(app) {
         ? `<a href="${esc(profile.landing ?? '/console')}" data-nav class="btn btn-outline-secondary btn-lg w-100">${esc(t('openWorkspace'))}</a>`
         : `<a href="/login" data-nav class="btn btn-outline-secondary btn-lg w-100">${esc(t('signIn'))}</a>`
     }`);
-  mountScan(app.root, (code) => app.navigate(`/v/${code}`));
+  mountScan(
+    app.root,
+    (code) => app.navigate(`/v/${code}`),
+    (token) => app.navigate(`/r/${token}`),
+  );
 }

@@ -909,6 +909,38 @@ a.brand:hover {
   padding-top: 4px;
 }
 
+.partner-actions .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.partner-actions .btn svg {
+  width: 16px;
+  height: 16px;
+}
+
+.partner-qr {
+  width: fit-content;
+  margin: 0 auto 8px;
+  padding: 10px;
+  background: #fff;
+  border: 1px solid var(--bs-border-color);
+  border-radius: 12px;
+}
+
+.partner-qr img {
+  display: block;
+  width: 220px;
+  height: 220px;
+}
+
+.partner-qr-link {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--bs-secondary-color);
+}
+
 .scan {
   display: grid;
   gap: 12px;
