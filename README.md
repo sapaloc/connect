@@ -29,12 +29,22 @@ Health check: `GET /api/v1/health`.
 ## Accounts
 
 ```bash
-pnpm seed                 # local/test only: Platform Admin, Tenant Admin, Manager, Staff, multi-role user
-                          # (emails in apps/api/src/db/seed-local.js, password = SEED_PASSWORD in .env)
+pnpm seed                 # local/test/uat (refused on production): Platform Admin, Tenant Admin, Manager, Staff,
+                          # multi-role user (emails in apps/api/src/db/seed-local.js, password = SEED_PASSWORD)
 DATABASE_URL=<uat pooler url> pnpm user:create --email a@b.vn --name "Name" --role TENANT_ADMIN --tenant Number160
 ```
 
-`user:create` prompts for the password; it is never passed as an argument or committed. Other people are
+`pnpm seed` only creates the accounts the first time; later runs skip, so passwords and roles changed during
+testing are kept. UAT runs it after migrations on every deploy (password from the `UAT_SEED_PASSWORD` secret,
+used only on that first run). Share the password privately, never in the repo.
+
+To start over with an empty database plus fresh test accounts (local/test/uat only, never production):
+
+```bash
+pnpm db:reset --confirm local   # --confirm must repeat APP_ENV
+```
+
+On UAT use GitHub Actions → **Reset UAT database** → Run workflow on `uat`, typing `reset uat`. `user:create` prompts for the password; it is never passed as an argument or committed. Other people are
 invited from Console → Team; the invitation (72h) and reset (1h) links are shown once to the admin, who sends
 them by Zalo or email.
 
@@ -56,4 +66,5 @@ pnpm test:permission      # only @permission tests
 
 ## Deploy secrets (GitHub Actions)
 
-`VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`, `UAT_DATABASE_MIGRATION_URL` (Supabase session pooler, port 5432).
+`VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`, `UAT_DATABASE_MIGRATION_URL` (Supabase session pooler, port 5432),
+`UAT_SEED_PASSWORD` (optional; test account password on UAT, must meet the password policy).

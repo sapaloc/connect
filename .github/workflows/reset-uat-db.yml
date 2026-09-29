@@ -1,0 +1,47 @@
+name: Reset UAT database
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Deletes ALL UAT data, re-runs migrations and seeds test accounts. Type: reset uat'
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-uat
+  cancel-in-progress: false
+
+jobs:
+  reset:
+    name: reset
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: ${{ github.ref == 'refs/heads/uat' }}
+    steps:
+      - name: Check confirmation
+        if: ${{ inputs.confirm != 'reset uat' }}
+        run: |
+          echo "::error::Type exactly: reset uat"
+          exit 1
+
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Reset
+        env:
+          APP_ENV: uat
+          DATABASE_MIGRATION_URL: ${{ secrets.UAT_DATABASE_MIGRATION_URL }}
+          SEED_PASSWORD: ${{ secrets.UAT_SEED_PASSWORD }}
+        run: pnpm db:reset --confirm uat

@@ -3,8 +3,8 @@ import http from 'node:http';
 import pg from 'pg';
 import { env } from '../src/config/env.js';
 import { connectionConfig } from '../src/db/connection.js';
-import { migrate } from '../src/db/migrate.js';
 import { getPool } from '../src/db/pool.js';
+import { resetSchema } from '../src/db/reset.js';
 import { seed } from '../src/db/seed-local.js';
 import { handle } from '../src/http/app.js';
 
@@ -14,11 +14,10 @@ export const PASSWORD = env.seedPassword;
 export async function resetDatabase() {
   if (env.appEnv !== 'test') throw new Error('Integration tests need APP_ENV=test (see .env.test)');
   if (passwordPolicyErrors(PASSWORD).length) throw new Error('SEED_PASSWORD in .env.test does not meet the password policy');
+  await resetSchema(env.databaseMigrationUrl);
   const client = new pg.Client(connectionConfig(env.databaseMigrationUrl));
   await client.connect();
   try {
-    await client.query('DROP SCHEMA public CASCADE; CREATE SCHEMA public;');
-    await migrate(env.databaseMigrationUrl);
     await client.query('BEGIN');
     const tenantId = await seed(client, PASSWORD);
     await client.query('COMMIT');
