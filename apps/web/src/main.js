@@ -7,7 +7,7 @@ import { applyTheme, toggleTheme } from './theme.js';
 import { stopScanner } from './scanner.js';
 import { forgotView, inviteView, loginView, resetView, selectRoleView } from './views/auth.js';
 import { homeView } from './views/home.js';
-import { showMessage } from './views/common.js';
+import { showMessage, togglePasswordReveal } from './views/common.js';
 import { consoleView, counterView, merchantsView, myView, teamView, vouchersView } from './views/shell.js';
 import { voucherPublicView } from './views/voucher-public.js';
 
@@ -125,6 +125,11 @@ document.addEventListener('click', (event) => {
   const drawer = target.closest('[data-drawer]');
   if (drawer) {
     setDrawer(drawer.getAttribute('data-drawer') === 'open');
+    return;
+  }
+  const reveal = /** @type {HTMLElement | null} */ (target.closest('[data-reveal]'));
+  if (reveal) {
+    togglePasswordReveal(reveal);
     return;
   }
   if (target.closest('[data-theme]')) {
