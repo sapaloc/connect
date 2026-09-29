@@ -212,11 +212,19 @@ const DEFINITIONS = {
  * @param {import('mongodb').Db} db
  */
 export async function setup(db) {
-  const existing = new Set((await db.listCollections({}, { nameOnly: true }).toArray()).map((c) => c.name));
+  const existing = new Map((await db.listCollections().toArray()).map((c) => [c.name, c.options?.validator]));
   for (const [name, { schema, indexes }] of Object.entries(DEFINITIONS)) {
     const validator = { $jsonSchema: schema };
     if (existing.has(name)) {
-      await db.command({ collMod: name, validator, validationLevel: 'strict', validationAction: 'error' });
+      // Atlas users created by the Vercel integration may not run collMod, so only call it on a real change.
+      if (JSON.stringify(existing.get(name)) !== JSON.stringify(validator)) {
+        await db
+          .command({ collMod: name, validator, validationLevel: 'strict', validationAction: 'error' })
+          .catch((error) => {
+            if (error?.codeName !== 'AtlasError' && error?.code !== 13) throw error;
+            throw new Error(`db:setup: validator of "${name}" changed; run with a database user allowed to collMod (${error.message})`);
+          });
+      }
     } else {
       await db.createCollection(name, { validator, validationLevel: 'strict', validationAction: 'error' });
     }
