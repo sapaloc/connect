@@ -2,6 +2,7 @@ import { esc } from '../dom.js';
 import { getLang, t } from '../i18n.js';
 import { icon, navItem, visibleNav } from '../nav.js';
 import { getTheme } from '../theme.js';
+import { counterPanel, mountCounter } from './counter.js';
 import { merchantsPanel, mountMerchants } from './merchants.js';
 import { mountTeam, teamPanel } from './team.js';
 import { mountVouchers, vouchersPanel } from './vouchers.js';
@@ -191,7 +192,8 @@ export function vouchersView(app) {
 
 /** @param {App} app */
 export function counterView(app) {
-  render(app, '/counter', `<section class="card-sw">${emptyState(t('counterTitle'), t('counterEmpty'), 'scan')}</section>`);
+  render(app, '/counter', counterPanel());
+  mountCounter(app);
 }
 
 /** @param {App} app */

@@ -3,12 +3,13 @@ import { api } from '../api.js';
 import { esc } from '../dom.js';
 import { errorText, t } from '../i18n.js';
 import { langToggle } from './common.js';
+import { mountRedeem } from './redeem.js';
 import { bindVoucherActions, fillQr, voucherActions, voucherCard } from './voucher-card.js';
 
 /** @typedef {import('../main.js').App} App */
 
 /** @param {string} body */
-function publicLayout(body) {
+export function publicLayout(body) {
   return `
     <main class="auth-shell">
       <section class="auth-card public-card">
@@ -33,8 +34,14 @@ export async function voucherPublicView(app, rawCode) {
   const page = /** @type {HTMLElement} */ (document.getElementById('voucher-page'));
   try {
     if (!code) throw { code: 'VOUCHER_NOT_FOUND' };
-    const { voucher } = await api('GET', `/api/v1/public/vouchers/${encodeURIComponent(code)}`);
+    const { voucher, canRedeem } = await api('GET', `/api/v1/public/vouchers/${encodeURIComponent(code)}`);
     page.className = '';
+    if (canRedeem) {
+      const { voucher: full } = await api('GET', `/api/v1/vouchers/${encodeURIComponent(code)}`);
+      page.innerHTML = '<div id="public-redeem"></div>';
+      mountRedeem(/** @type {HTMLElement} */ (document.getElementById('public-redeem')), full, () => app.navigate('/counter'));
+      return;
+    }
     page.innerHTML = `
       ${voucherCard(voucher)}
       ${voucher.status === 'ACTIVE' ? `<p class="text-center small text-muted mt-3 mb-2">${esc(t('showAtCounter'))}</p>${voucherActions(voucher)}` : ''}`;

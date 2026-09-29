@@ -1,4 +1,6 @@
 import {
+  calculateDirectRedemption,
+  can,
   effectiveVoucherStatus,
   MoneyError,
   parseDecimal,
@@ -13,6 +15,7 @@ import { randomInt, randomUUID } from 'node:crypto';
 import { actorOf, recordAudit } from '../audit/audit.js';
 import { authed } from '../auth/guard.js';
 import { consume } from '../auth/rate-limit.js';
+import { loadSession } from '../auth/session.js';
 import { RATE_LIMITS } from '../config/security.js';
 import { fromDecimal128, toDecimal128 } from '../db/decimal.js';
 import { collection } from '../db/mongo.js';
@@ -318,6 +321,7 @@ async function voidVoucher(req, res, ctx) {
 
 /**
  * Anyone holding the code (customer, counter before sign-in). No customer name, note or staff data.
+ * `canRedeem` tells a signed-in counter role of the same merchant to show the redeem form.
  * @type {import('../http/router.js').Handler}
  */
 async function publicVoucher(req, res, ctx) {
@@ -327,7 +331,90 @@ async function publicVoucher(req, res, ctx) {
   const voucher = code ? await vouchers.findOne({ code }) : null;
   const names = voucher ? await merchantNames([voucher.tenantId]) : new Map();
   if (!voucher || !names.has(voucher.tenantId)) throw new HttpError(404, 'VOUCHER_NOT_FOUND', 'Voucher not found');
-  sendJson(res, 200, { voucher: publicView(voucher, /** @type {string} */ (names.get(voucher.tenantId)), new Date()) });
+  const session = await loadSession(req);
+  const canRedeem = Boolean(session && can(session.role, 'redemption.create') && session.tenantId === voucher.tenantId);
+  sendJson(res, 200, { voucher: publicView(voucher, /** @type {string} */ (names.get(voucher.tenantId)), new Date()), canRedeem });
+}
+
+/**
+ * Counter lookup after a scan: the full voucher, only inside the signed-in merchant.
+ * @type {import('../http/router.js').Handler}
+ */
+async function counterVoucher(_req, res, ctx) {
+  const session = sessionOf(ctx);
+  const code = parseVoucherCode(ctx.params.code);
+  const vouchers = await collection('vouchers');
+  const voucher = code ? await vouchers.findOne({ code, tenantId: session.tenantId }) : null;
+  if (!voucher) throw new HttpError(404, 'VOUCHER_NOT_FOUND', 'Voucher not found');
+  sendJson(res, 200, { voucher: voucherView(voucher, new Date(), await merchantNames([voucher.tenantId])) });
+}
+
+/**
+ * @param {string} status effective status
+ * @param {any} voucher
+ */
+function notRedeemable(status, voucher) {
+  if (status === 'REDEEMED') {
+    return new HttpError(409, 'VOUCHER_ALREADY_REDEEMED', 'This voucher was already redeemed', {
+      details: { redeemedAt: voucher.redemption?.redeemedAt?.toISOString() ?? null },
+    });
+  }
+  if (status === 'EXPIRED') return new HttpError(409, 'VOUCHER_EXPIRED', 'This voucher has expired');
+  return new HttpError(409, 'VOUCHER_VOID', 'This voucher was voided');
+}
+
+/**
+ * Redeems once. The conditional update on status ACTIVE inside a transaction means two counters
+ * confirming at the same time get one success and one 409 (VCH-04).
+ * @type {import('../http/router.js').Handler}
+ */
+async function redeemVoucher(req, res, ctx) {
+  const session = sessionOf(ctx);
+  const code = parseVoucherCode(ctx.params.code);
+  if (!code) throw new HttpError(404, 'VOUCHER_NOT_FOUND', 'Voucher not found');
+  const body = await readJson(req);
+
+  const redeemed = await withTransaction(async (tx) => {
+    const now = new Date();
+    const vouchers = await collection('vouchers');
+    const voucher = await vouchers.findOne({ code, tenantId: session.tenantId }, { session: tx });
+    if (!voucher) throw new HttpError(404, 'VOUCHER_NOT_FOUND', 'Voucher not found');
+    const status = effectiveVoucherStatus(voucher.status, voucher.validUntil, now);
+    if (status !== 'ACTIVE') throw notRedeemable(status, voucher);
+
+    let amounts;
+    try {
+      amounts = calculateDirectRedemption({
+        discountType: voucher.discountType,
+        discountValue: fromDecimal128(voucher.discountValue),
+        minBillAmount: voucher.minBillAmount ? fromDecimal128(voucher.minBillAmount) : null,
+        grossAmount: body.grossAmount,
+      });
+    } catch (error) {
+      throw moneyToHttp(error);
+    }
+    const redemption = {
+      grossAmount: toDecimal128(amounts.grossAmount),
+      discountAmount: toDecimal128(amounts.discountAmount),
+      payableAmount: toDecimal128(amounts.payableAmount),
+      redeemedBy: session.userId,
+      roleAssignmentId: session.roleAssignmentId,
+      redeemedAt: now,
+    };
+    const result = await vouchers.updateOne(
+      { _id: voucher._id, status: 'ACTIVE', validUntil: { $gt: now } },
+      { $set: { status: 'REDEEMED', redemption } },
+      { session: tx },
+    );
+    if (result.modifiedCount !== 1) throw notRedeemable('REDEEMED', voucher);
+    await recordAudit(
+      { ...actorOf(ctx), eventType: 'VOUCHER_REDEEMED', entityType: 'voucher', entityId: voucher._id, before: { status: 'ACTIVE' }, after: amounts },
+      { session: tx },
+    );
+    return { ...voucher, status: 'REDEEMED', redemption };
+  });
+
+  sendJson(res, 200, { voucher: voucherView(redeemed, new Date(), await merchantNames([redeemed.tenantId])) });
 }
 
 /** @type {import('../http/router.js').RouteDef[]} */
@@ -335,5 +422,7 @@ export const voucherRoutes = [
   { method: 'GET', path: '/api/v1/vouchers', handler: authed(listVouchers, { permission: 'voucher.list' }) },
   { method: 'POST', path: '/api/v1/vouchers', handler: authed(issueVouchers, { permission: 'voucher.issue' }) },
   { method: 'POST', path: '/api/v1/vouchers/:code/void', handler: authed(voidVoucher, { permission: 'voucher.void' }) },
+  { method: 'GET', path: '/api/v1/vouchers/:code', handler: authed(counterVoucher, { permission: 'voucher.validate' }) },
+  { method: 'POST', path: '/api/v1/vouchers/:code/redeem', handler: authed(redeemVoucher, { permission: 'redemption.create' }) },
   { method: 'GET', path: '/api/v1/public/vouchers/:code', handler: publicVoucher },
 ];

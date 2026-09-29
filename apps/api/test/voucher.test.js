@@ -18,6 +18,7 @@ before(async () => {
   await resetDatabase();
   const other = await ensureTenant('Other Shop');
   await ensureActiveUser({ email: 'admin@other.local', displayName: 'Other Admin', password: PASSWORD, role: ROLES.TENANT_ADMIN, tenantId: other });
+  await ensureActiveUser({ email: 'staff@other.local', displayName: 'Other Staff', password: PASSWORD, role: ROLES.STAFF, tenantId: other });
   server = await startServer();
 });
 
@@ -177,5 +178,88 @@ describe('@permission voiding a voucher', () => {
   it('Staff cannot void', async () => {
     const code = (await (await signedIn('admin@number160.local')).post('/api/v1/vouchers', TERMS)).body.vouchers[0].code;
     assert.equal((await (await signedIn('staff@number160.local')).post(`/api/v1/vouchers/${code}/void`, { reason: 'x' })).status, 403);
+  });
+});
+
+/** @param {Record<string, unknown>} [terms] */
+async function issueOne(terms = TERMS) {
+  const res = await (await signedIn('admin@number160.local')).post('/api/v1/vouchers', terms);
+  assert.equal(res.status, 201);
+  return /** @type {string} */ (res.body.vouchers[0].code);
+}
+
+describe('@money @permission redeeming at the counter', () => {
+  it('Staff looks the voucher up and redeems it with the right amounts', async () => {
+    const code = await issueOne({ ...TERMS, customerName: 'Anh Minh' });
+    const staff = await signedIn('staff@number160.local');
+    const lookup = await staff.get(`/api/v1/vouchers/${code.toLowerCase()}`);
+    assert.equal(lookup.status, 200);
+    assert.equal(lookup.body.voucher.customerName, 'Anh Minh');
+
+    const res = await staff.post(`/api/v1/vouchers/${code}/redeem`, { grossAmount: '1000000' });
+    assert.equal(res.status, 200);
+    assert.equal(res.body.voucher.status, 'REDEEMED');
+    assert.deepEqual(
+      { ...res.body.voucher.redemption, redeemedAt: undefined },
+      { grossAmount: '1000000.0000', discountAmount: '100000.0000', payableAmount: '900000.0000', redeemedAt: undefined },
+    );
+    const events = await collection('auditEvents');
+    assert.equal(await events.countDocuments({ eventType: 'VOUCHER_REDEEMED' }), 1);
+  });
+
+  it('VCH-04: two counters confirming at once give one success and one 409', async () => {
+    const code = await issueOne();
+    const [staff, manager] = await Promise.all([signedIn('staff@number160.local'), signedIn('manager@number160.local')]);
+    const results = await Promise.all([
+      staff.post(`/api/v1/vouchers/${code}/redeem`, { grossAmount: '500000' }),
+      manager.post(`/api/v1/vouchers/${code}/redeem`, { grossAmount: '600000' }),
+    ]);
+    assert.deepEqual(results.map((r) => r.status).sort(), [200, 409]);
+    assert.equal(results.find((r) => r.status === 409)?.body.error.code, 'VOUCHER_ALREADY_REDEEMED');
+    const vouchers = await collection('vouchers');
+    assert.equal((await vouchers.findOne({ code }))?.status, 'REDEEMED');
+  });
+
+  it('VCH-05: another merchant cannot look up or redeem it', async () => {
+    const code = await issueOne();
+    const otherStaff = await signedIn('staff@other.local');
+    assert.equal((await otherStaff.get(`/api/v1/vouchers/${code}`)).status, 404);
+    assert.equal((await otherStaff.post(`/api/v1/vouchers/${code}/redeem`, { grossAmount: '100000' })).status, 404);
+  });
+
+  it('refuses a bill below the minimum, then accepts it at the minimum', async () => {
+    const code = await issueOne({ discountType: 'AMOUNT', discountValue: '200000', minBillAmount: '1000000', validUntil: vnDate(3) });
+    const staff = await signedIn('staff@number160.local');
+    const low = await staff.post(`/api/v1/vouchers/${code}/redeem`, { grossAmount: '999999' });
+    assert.equal(low.status, 422);
+    assert.equal(low.body.error.code, 'BELOW_MIN_BILL');
+    const ok = await staff.post(`/api/v1/vouchers/${code}/redeem`, { grossAmount: 1000000 });
+    assert.equal(ok.body.voucher.redemption.payableAmount, '800000.0000');
+  });
+
+  it('refuses expired and voided vouchers', async () => {
+    const expired = await issueOne();
+    const vouchers = await collection('vouchers');
+    await vouchers.updateOne({ code: expired }, { $set: { validUntil: new Date(Date.now() - 1000) } });
+    const voided = await issueOne();
+    await (await signedIn('admin@number160.local')).post(`/api/v1/vouchers/${voided}/void`, { reason: 'test' });
+
+    const staff = await signedIn('staff@number160.local');
+    assert.equal((await staff.post(`/api/v1/vouchers/${expired}/redeem`, { grossAmount: '100000' })).body.error.code, 'VOUCHER_EXPIRED');
+    assert.equal((await staff.post(`/api/v1/vouchers/${voided}/redeem`, { grossAmount: '100000' })).body.error.code, 'VOUCHER_VOID');
+  });
+
+  it('Merchant admin cannot redeem', async () => {
+    const code = await issueOne();
+    assert.equal((await (await signedIn('admin@number160.local')).post(`/api/v1/vouchers/${code}/redeem`, { grossAmount: '1' })).status, 403);
+  });
+
+  it('the public page offers redeem only to a counter role of the same merchant', async () => {
+    const code = await issueOne();
+    const path = `/api/v1/public/vouchers/${code}`;
+    assert.equal((await new Agent(server.baseUrl).get(path)).body.canRedeem, false);
+    assert.equal((await (await signedIn('staff@number160.local')).get(path)).body.canRedeem, true);
+    assert.equal((await (await signedIn('staff@other.local')).get(path)).body.canRedeem, false);
+    assert.equal((await (await signedIn('admin@number160.local')).get(path)).body.canRedeem, false);
   });
 });
