@@ -849,6 +849,66 @@ a.brand:hover {
   max-width: 440px;
 }
 
+.rule-preview[data-tone='success'] {
+  color: var(--sw-good);
+}
+
+.rule-preview[data-tone='error'] {
+  color: var(--sw-danger);
+}
+
+.rule-preview[data-tone='info'] {
+  color: var(--sw-ink3);
+}
+
+.partner-list {
+  display: grid;
+  gap: 12px;
+}
+
+@media (min-width: 992px) {
+  .partner-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.partner-card {
+  display: grid;
+  gap: 6px;
+  padding: 14px;
+  border: 1px solid var(--sw-line);
+  border-radius: 14px;
+}
+
+.partner-card.is-ended {
+  opacity: 0.65;
+}
+
+.partner-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.partner-name {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.partner-accounts {
+  padding-top: 6px;
+  border-top: 1px solid var(--sw-line);
+}
+
+.partner-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-top: 4px;
+}
+
 .scan {
   display: grid;
   gap: 12px;

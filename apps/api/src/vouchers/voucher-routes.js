@@ -6,7 +6,6 @@ import {
   parseDecimal,
   parseDirectDiscount,
   parseVoucherCode,
-  ROLES,
   VOUCHER_BATCH_MAX,
   VOUCHER_CODE_ALPHABET,
   VOUCHER_CODE_LENGTH,
@@ -23,12 +22,12 @@ import { withTransaction } from '../db/tx.js';
 import { HttpError } from '../http/errors.js';
 import { clientIp, readJson, stringField } from '../http/request.js';
 import { sendJson } from '../http/respond.js';
+import { merchantNames, scopeFilter, UUID_PATTERN } from '../merchants/scope.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const VN_OFFSET_MS = 7 * 60 * 60 * 1000;
 const MAX_VALIDITY_DAYS = 366;
 const LIST_LIMIT = 100;
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
 const STATUS_FILTERS = ['ACTIVE', 'REDEEMED', 'EXPIRED', 'VOID'];
 
@@ -127,27 +126,6 @@ function publicView(voucher, merchantName, now) {
     minBillAmount: voucher.minBillAmount ? fromDecimal128(voucher.minBillAmount) : null,
     validUntil: voucher.validUntil.toISOString(),
   };
-}
-
-/** @param {string[]} tenantIds */
-async function merchantNames(tenantIds) {
-  const tenants = await collection('tenants');
-  const rows = await tenants.find({ _id: { $in: [...new Set(tenantIds)] } }, { projection: { name: 1 } }).toArray();
-  return new Map(rows.map((tenant) => [tenant._id, tenant.name]));
-}
-
-/**
- * Platform admin sees every merchant (optionally one); merchant roles only their own.
- * @param {import('../auth/session.js').Session} session
- * @param {string | null} requested
- */
-function scopeFilter(session, requested) {
-  if (session.role === ROLES.PLATFORM_ADMIN) {
-    if (!requested) return {};
-    if (!UUID_PATTERN.test(requested)) throw new HttpError(422, 'VALIDATION', 'merchantId is invalid', { details: { field: 'merchantId' } });
-    return { tenantId: requested.toLowerCase() };
-  }
-  return { tenantId: session.tenantId };
 }
 
 /**

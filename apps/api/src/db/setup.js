@@ -8,7 +8,7 @@ import { closeClient, COLLECTIONS, getDb } from './mongo.js';
  * Bump when a validator or index changes. Changes must keep old documents valid
  * (add optional fields; backfill in a script before making a field required).
  */
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 const DAY_SECONDS = 24 * 60 * 60;
 const uuid = { bsonType: 'string', pattern: '^[0-9a-f-]{36}$' };
@@ -91,8 +91,8 @@ const DEFINITIONS = {
         createdAt: date,
       },
     },
-    // slug, contactEmail, contactPhone, address are optional and not in the validator: changing an
-    // existing validator needs collMod, which the UAT database user may not run.
+    // slug, contactEmail, contactPhone, address, vatRate are optional and not in the validator: changing
+    // an existing validator needs collMod, which the UAT database user may not run.
     indexes: [
       { key: { name: 1 }, name: 'name_uq', unique: true },
       { key: { slug: 1 }, name: 'slug_uq', unique: true, partialFilterExpression: { slug: { $type: 'string' } } },
@@ -254,6 +254,69 @@ const DEFINITIONS = {
       { key: { tenantId: 1, createdAt: -1 }, name: 'tenant_created' },
       { key: { tenantId: 1, status: 1, validUntil: 1 }, name: 'tenant_status' },
       { key: { batchId: 1 }, name: 'batch', partialFilterExpression: { batchId: { $type: 'string' } } },
+    ],
+  },
+
+  // Partner relationship (plan §9.2). Never deleted: ENDED keeps the history.
+  [COLLECTIONS.partners]: {
+    schema: {
+      bsonType: 'object',
+      required: ['_id', 'tenantId', 'name', 'nameKey', 'relationshipKind', 'partnerType', 'status', 'createdBy', 'createdAt', 'updatedAt'],
+      properties: {
+        _id: uuid,
+        tenantId: uuid,
+        name: text,
+        nameKey: text,
+        relationshipKind: { enum: ['COMPANY', 'INDEPENDENT_INDIVIDUAL'] },
+        partnerType: { enum: ['HOTEL', 'RESTAURANT', 'TOUR_GUIDE', 'DRIVER', 'OTHER'] },
+        status: { enum: ['ONBOARDING', 'ACTIVE', 'PAUSED', 'ENDED'] },
+        contactName: { bsonType: ['string', 'null'] },
+        contactPhone: { bsonType: ['string', 'null'] },
+        contactEmail: { bsonType: ['string', 'null'] },
+        note: { bsonType: ['string', 'null'] },
+        createdBy: uuid,
+        createdAt: date,
+        updatedAt: date,
+        endedAt: nullableDate,
+        endedBy: nullableUuid,
+        endReason: { bsonType: ['string', 'null'] },
+      },
+    },
+    indexes: [
+      { key: { tenantId: 1, nameKey: 1 }, name: 'tenant_name_uq', unique: true },
+      { key: { tenantId: 1, status: 1, name: 1 }, name: 'tenant_status' },
+    ],
+  },
+
+  // Commercial rule versions (plan §9.3): one ACTIVE per partner; vouchers snapshot the rates they were issued with.
+  [COLLECTIONS.commercialRules]: {
+    schema: {
+      bsonType: 'object',
+      required: ['_id', 'tenantId', 'partnerId', 'version', 'status', 'relationshipKind', 'totalBudgetRate', 'customerDiscountRate',
+        'effectiveFrom', 'createdBy', 'createdAt'],
+      properties: {
+        _id: uuid,
+        tenantId: uuid,
+        partnerId: uuid,
+        version: { bsonType: 'int', minimum: 1 },
+        status: { enum: ['ACTIVE', 'SUPERSEDED'] },
+        relationshipKind: { enum: ['COMPANY', 'INDEPENDENT_INDIVIDUAL'] },
+        totalBudgetRate: decimalField,
+        customerDiscountRate: decimalField,
+        companyCommissionRate: { bsonType: ['decimal', 'null'] },
+        individualShareRate: { bsonType: ['decimal', 'null'] },
+        companyNetCommissionRate: { bsonType: ['decimal', 'null'] },
+        individualCommissionRate: { bsonType: ['decimal', 'null'] },
+        effectiveFrom: date,
+        supersededAt: nullableDate,
+        createdBy: uuid,
+        createdAt: date,
+      },
+    },
+    indexes: [
+      { key: { partnerId: 1, version: 1 }, name: 'partner_version_uq', unique: true },
+      { key: { partnerId: 1 }, name: 'partner_active_uq', unique: true, partialFilterExpression: { status: 'ACTIVE' } },
+      { key: { tenantId: 1, status: 1 }, name: 'tenant_status' },
     ],
   },
 

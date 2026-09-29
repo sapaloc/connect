@@ -10,6 +10,8 @@ export const COLLECTIONS = Object.freeze({
   rateLimits: 'rate_limits',
   auditEvents: 'audit_events',
   vouchers: 'vouchers',
+  partners: 'partners',
+  commercialRules: 'commercial_rules',
   schemaVersions: 'schema_versions',
 });
 

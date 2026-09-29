@@ -62,7 +62,7 @@ async function listUsers(req, res, ctx) {
   const users = await collection('users');
   const members = await users
     .find(
-      { roles: { $elemMatch: { tenantId, status: 'ACTIVE' } } },
+      { roles: { $elemMatch: { tenantId, status: 'ACTIVE', role: { $in: TENANT_ROLES } } } },
       { projection: { email: 1, displayName: 1, status: 1, roles: 1 }, sort: { displayName: 1 } },
     )
     .toArray();
@@ -81,7 +81,10 @@ async function listUsers(req, res, ctx) {
       displayName: user.displayName,
       status: user.status,
       roles: user.roles
-        .filter((/** @type {any} */ assignment) => assignment.tenantId === tenantId && assignment.status === 'ACTIVE')
+        .filter(
+          (/** @type {any} */ assignment) =>
+            assignment.tenantId === tenantId && assignment.status === 'ACTIVE' && TENANT_ROLES.includes(assignment.role),
+        )
         .map((/** @type {any} */ assignment) => assignment.role)
         .sort(),
       invitationOpen: withOpenInvitation.has(user._id),
@@ -94,36 +97,46 @@ async function listUsers(req, res, ctx) {
  */
 
 /**
- * Reads and checks the person to invite; the acting role must be allowed to grant `role`.
+ * Email, name and language of the person to invite.
  * @param {Record<string, unknown>} body
- * @param {import('../auth/session.js').Session} session
- * @returns {Invitee}
+ * @returns {Omit<Invitee, 'role'>}
  */
-export function parseInvitee(body, session) {
+export function parsePerson(body) {
   const email = stringField(body, 'email', { max: 254 }).trim().toLowerCase();
   const displayName = stringField(body, 'displayName', { max: 120 }).trim();
-  const role = stringField(body, 'role', { max: 32 });
   const language = stringField(body, 'preferredLanguage', { max: 2, optional: true }) || 'en';
   if (!EMAIL_PATTERN.test(email)) throw new HttpError(422, 'VALIDATION', 'email is invalid', { details: { field: 'email' } });
   if (!displayName) throw new HttpError(422, 'VALIDATION', 'displayName is required', { details: { field: 'displayName' } });
   if (language !== 'vi' && language !== 'en') {
     throw new HttpError(422, 'VALIDATION', 'preferredLanguage is invalid', { details: { field: 'preferredLanguage' } });
   }
-  if (!canInvite(/** @type {string} */ (session.role), role)) {
-    throw new HttpError(403, 'FORBIDDEN', 'You cannot invite this role');
-  }
-  return { email, displayName, role, preferredLanguage: language };
+  return { email, displayName, preferredLanguage: language };
 }
 
 /**
- * Creates or re-sends an invitation to a tenant role; an active account just gets the extra role.
+ * Reads and checks the person to invite; the acting role must be allowed to grant `role`.
+ * @param {Record<string, unknown>} body
+ * @param {import('../auth/session.js').Session} session
+ * @returns {Invitee}
+ */
+export function parseInvitee(body, session) {
+  const person = parsePerson(body);
+  const role = stringField(body, 'role', { max: 32 });
+  if (!canInvite(/** @type {string} */ (session.role), role)) {
+    throw new HttpError(403, 'FORBIDDEN', 'You cannot invite this role');
+  }
+  return { ...person, role };
+}
+
+/**
+ * Creates or re-sends an invitation to a tenant or partner role; an active account just gets the extra role.
  * Re-sending revokes the previous link (§8.1). The tenant must be ACTIVE (it may be created in `tx`).
  * @param {import('node:http').IncomingMessage} req
  * @param {import('../http/router.js').Context} ctx
- * @param {Invitee & { tenantId: string }} input
+ * @param {Invitee & { tenantId: string, partnerRelationshipId?: string | null }} input
  * @param {import('mongodb').ClientSession} tx
  */
-export async function inviteMember(req, ctx, { email, displayName, role, preferredLanguage, tenantId }, tx) {
+export async function inviteMember(req, ctx, { email, displayName, role, preferredLanguage, tenantId, partnerRelationshipId = null }, tx) {
   const session = sessionOf(ctx);
   const tenants = await collection('tenants');
   if (!(await tenants.countDocuments({ _id: tenantId, status: 'ACTIVE' }, { session: tx, limit: 1 }))) {
@@ -154,7 +167,7 @@ export async function inviteMember(req, ctx, { email, displayName, role, preferr
       { session: tx },
     );
   }
-  await grantRole(user._id, { role, tenantId, createdBy: session.userId }, { session: tx });
+  await grantRole(user._id, { role, tenantId, partnerRelationshipId, createdBy: session.userId }, { session: tx });
 
   // An active account just gets the extra role; it signs in with its current password.
   if (user.status === 'ACTIVE') {
