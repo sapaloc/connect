@@ -24,6 +24,24 @@ export function parseVoucherCode(input) {
   return VOUCHER_CODE_PATTERN.test(code) ? code : null;
 }
 
+/** A referral voucher is valid 7 × 24 h from activation (plan §9.6). */
+export const REFERRAL_VALIDITY_DAYS = 7;
+
+/** Opaque public token of a partner QR: 16 random bytes, base64url. */
+export const REFERRAL_TOKEN_PATTERN = /^[A-Za-z0-9_-]{22}$/;
+
+/**
+ * Accepts a scanned partner QR link ending in /r/<token>, or the bare token.
+ * @param {unknown} input
+ * @returns {string | null}
+ */
+export function parseReferralToken(input) {
+  let value = String(input ?? '').trim();
+  const link = /\/r\/([A-Za-z0-9_-]+)\/?(?:[?#].*)?$/.exec(value);
+  if (link) value = link[1];
+  return REFERRAL_TOKEN_PATTERN.test(value) ? value : null;
+}
+
 /** @param {string} code "ABCDEFGH" -> "ABCD-EFGH" */
 export function formatVoucherCode(code) {
   return `${code.slice(0, 4)}-${code.slice(4)}`;

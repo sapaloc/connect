@@ -1,6 +1,36 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { commercialRuleFromPercents, MoneyError, parseVatPercent, partnerAccountRole, ROLES } from '../src/index.js';
+import {
+  commercialRuleFromPercents,
+  MoneyError,
+  parseReferralToken,
+  parseVatPercent,
+  parseVoucherCode,
+  partnerAccountRole,
+  partnerMediumType,
+  ROLES,
+} from '../src/index.js';
+
+describe('partner QR token', () => {
+  const token = 'Ab3_-xYz0123456789abcd';
+
+  it('reads a scanned link or the bare token', () => {
+    assert.equal(parseReferralToken(`https://connect-uat.vercel.app/r/${token}`), token);
+    assert.equal(parseReferralToken(`http://localhost:5173/r/${token}/?utm=qr`), token);
+    assert.equal(parseReferralToken(` ${token} `), token);
+  });
+
+  it('is never mistaken for a voucher code and the other way round', () => {
+    assert.equal(parseReferralToken('https://x.test/v/ABCD2345'), null);
+    assert.equal(parseReferralToken('ABCD2345'), null);
+    assert.equal(parseVoucherCode(`https://x.test/r/${token}`), null);
+  });
+
+  it('medium type follows the relationship kind', () => {
+    assert.equal(partnerMediumType('COMPANY'), 'COMPANY_QR');
+    assert.equal(partnerMediumType('INDEPENDENT_INDIVIDUAL'), 'PERSONAL_DIGITAL_QR');
+  });
+});
 
 describe('@money commercial rule from typed percents', () => {
   it('company: commission and company net are derived so the allocation adds up (plan §7.1 example)', () => {

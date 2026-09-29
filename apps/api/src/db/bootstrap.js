@@ -1,5 +1,5 @@
-import { merchantSlug, ROLES } from '#domain';
-import { randomUUID } from 'node:crypto';
+import { merchantSlug, partnerMediumType, ROLES } from '#domain';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { hashPassword } from '../auth/password.js';
 import { collection } from './mongo.js';
 
@@ -58,6 +58,30 @@ export async function ensureTenant(name, options = {}) {
   const tenant = newTenant({ name, slug: merchantSlug(name) });
   await tenants.insertOne(tenant, options);
   return tenant._id;
+}
+
+/**
+ * A new ACTIVE partner QR with an unguessable public token.
+ * @param {{ _id: string, tenantId: string, relationshipKind: string }} partner
+ * @param {string} createdBy
+ * @param {string | null} [replacesMediumId]
+ */
+export function newReferralMedium(partner, createdBy, replacesMediumId = null) {
+  return {
+    _id: randomUUID(),
+    tenantId: partner.tenantId,
+    partnerId: partner._id,
+    mediumType: partnerMediumType(partner.relationshipKind),
+    publicToken: randomBytes(16).toString('base64url'),
+    status: 'ACTIVE',
+    replacesMediumId,
+    replacedAt: null,
+    replacedBy: null,
+    replaceReason: null,
+    lastActivationAt: null,
+    createdBy,
+    createdAt: new Date(),
+  };
 }
 
 /**

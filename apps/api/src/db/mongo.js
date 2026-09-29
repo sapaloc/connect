@@ -12,6 +12,8 @@ export const COLLECTIONS = Object.freeze({
   vouchers: 'vouchers',
   partners: 'partners',
   commercialRules: 'commercial_rules',
+  referralMedia: 'referral_media',
+  referralVisits: 'referral_visits',
   schemaVersions: 'schema_versions',
 });
 

@@ -2,6 +2,8 @@ import { commercialRuleFromPercents, PARTNER_TYPES, ratePercent } from '#domain'
 import { api } from '../api.js';
 import { $, busy, esc, formValues } from '../dom.js';
 import { errorText, formatDateTime, getLang, t } from '../i18n.js';
+import { downloadBlob, partnerQrImage, referralLink, referralQrDataUrl, sharePartnerQr } from '../voucher-ui.js';
+import { icon } from '../nav.js';
 import { messageSlot, showLink, showMessage } from './common.js';
 
 /** @typedef {import('../main.js').App} App */
@@ -14,6 +16,7 @@ import { messageSlot, showLink, showMessage } from './common.js';
  *   rule: null | { version: number, totalBudgetRate: string, customerDiscountRate: string,
  *     companyCommissionRate: string | null, individualCommissionRate: string | null },
  *   accounts: { id: string, email: string, displayName: string, status: string, role: string }[],
+ *   qr: null | { token: string, createdAt: string },
  * }} Partner
  */
 
@@ -259,6 +262,91 @@ function formDialog({ title, body, submit, onReady, onSubmit }) {
   /** @type {HTMLElement | null} */ (form.querySelector('input'))?.focus();
 }
 
+/** @param {Partner} partner */
+function qrOf(partner) {
+  return {
+    token: /** @type {NonNullable<Partner['qr']>} */ (partner.qr).token,
+    merchantName: partner.merchantName ?? 'MyConnect',
+    partnerName: partner.name,
+    discountRate: partner.rule?.customerDiscountRate ?? null,
+  };
+}
+
+/**
+ * The partner's QR to print or send, with a replace button for a lost or leaked one.
+ * @param {Partner} partner
+ * @param {{ manage: boolean, onReplaced: () => Promise<Partner | undefined> }} options
+ */
+function qrDialog(partner, { manage, onReplaced }) {
+  const dialog = document.createElement('dialog');
+  dialog.className = 'vdialog';
+  const draw = async (/** @type {Partner} */ current) => {
+    const qr = qrOf(current);
+    const link = referralLink(qr.token);
+    dialog.innerHTML = `
+      <div class="vdialog-inner">
+        <button type="button" class="btn-close vdialog-close" data-close aria-label="${esc(t('close'))}"></button>
+        <h2 class="h5 mb-1 pe-4">${esc(t('partnerQrTitle', { name: current.name }))}</h2>
+        <p class="small text-muted">${esc(t('partnerQrHint'))}</p>
+        ${current.status === 'PAUSED' ? `<p class="form-message" data-tone="error">${esc(t('partnerQrPaused'))}</p>` : ''}
+        <div class="partner-qr"><img alt="QR ${esc(current.name)}" width="240" height="240" /></div>
+        <p class="partner-qr-link small font-monospace text-center" translate="no">${esc(link)}</p>
+        <div class="vcard-actions">
+          <button type="button" class="btn btn-primary" data-qr-share>${esc(t('share'))}</button>
+          <button type="button" class="btn btn-outline-secondary" data-qr-download>${esc(t('downloadImage'))}</button>
+          <button type="button" class="btn btn-outline-secondary" data-qr-copy>${esc(t('copyLink'))}</button>
+        </div>
+        ${messageSlot('qr-message')}
+        ${
+          manage
+            ? `<hr class="my-3" />
+               <p class="small text-muted mb-2">${esc(t('partnerQrReplaceHint'))}</p>
+               <button type="button" class="btn btn-sm btn-outline-danger" data-qr-replace>${esc(t('partnerQrReplace'))}</button>`
+            : ''
+        }
+      </div>`;
+    /** @type {HTMLImageElement} */ (dialog.querySelector('.partner-qr img')).src = await referralQrDataUrl(qr.token, 480);
+  };
+
+  dialog.addEventListener('click', async (event) => {
+    const target = /** @type {HTMLElement} */ (event.target);
+    if (target === dialog || target.closest('[data-close]')) return dialog.close();
+    const button = /** @type {HTMLButtonElement | null} */ (target.closest('button'));
+    if (!button) return;
+    const qr = qrOf(partner);
+    try {
+      if (button.hasAttribute('data-qr-share')) {
+        button.disabled = true;
+        const outcome = await sharePartnerQr(qr);
+        if (outcome === 'downloaded') showMessage(t('imageDownloaded'), 'success', 'qr-message');
+      } else if (button.hasAttribute('data-qr-download')) {
+        button.disabled = true;
+        downloadBlob(await partnerQrImage(qr), `qr-${qr.token.slice(0, 8)}.png`);
+      } else if (button.hasAttribute('data-qr-copy')) {
+        await navigator.clipboard.writeText(referralLink(qr.token));
+        showMessage(t('copied'), 'success', 'qr-message');
+      } else if (button.hasAttribute('data-qr-replace')) {
+        if (!confirm(t('partnerQrReplaceConfirm', { name: partner.name }))) return;
+        button.disabled = true;
+        const updated = await onReplaced();
+        if (updated?.qr) {
+          partner = updated;
+          await draw(partner);
+          showMessage(t('partnerQrReplaced'), 'success', 'qr-message');
+        }
+      }
+    } catch (error) {
+      showMessage(errorText(error), 'error', 'qr-message');
+    } finally {
+      if (dialog.contains(button)) button.disabled = false;
+    }
+  });
+  dialog.addEventListener('close', () => dialog.remove());
+  document.body.append(dialog);
+  draw(partner);
+  dialog.showModal();
+}
+
 /**
  * @param {Partner} p
  * @param {{ manage: boolean, showMerchant: boolean }} options
@@ -274,9 +362,13 @@ function partnerCard(p, { manage, showMerchant }) {
         .join('')
     : `<span class="text-muted">${esc(t('noAccount'))}</span>`;
   const contact = [p.contactName, p.contactPhone, p.contactEmail].filter(Boolean).join(' · ');
+  const qrButton = p.qr
+    ? `<button type="button" class="btn btn-sm btn-outline-primary" data-action="qr" data-id="${esc(p.id)}">${icon('qr')}<span>${esc(t('partnerQr'))}</span></button>`
+    : '';
   const actions =
     manage && p.status !== 'ENDED'
       ? `<div class="partner-actions">
+          ${qrButton}
           <button type="button" class="btn btn-sm btn-outline-secondary" data-action="rule" data-id="${esc(p.id)}">${esc(t('editRule'))}</button>
           <button type="button" class="btn btn-sm btn-outline-secondary" data-action="invite" data-id="${esc(p.id)}">${esc(t('inviteAccount'))}</button>
           <button type="button" class="btn btn-sm btn-outline-secondary" data-action="${p.status === 'ACTIVE' ? 'pause' : 'resume'}" data-id="${esc(p.id)}">
@@ -284,7 +376,9 @@ function partnerCard(p, { manage, showMerchant }) {
           </button>
           <button type="button" class="btn btn-sm btn-outline-danger" data-action="end" data-id="${esc(p.id)}">${esc(t('endPartner'))}</button>
         </div>`
-      : '';
+      : qrButton
+        ? `<div class="partner-actions">${qrButton}</div>`
+        : '';
   return `
     <article class="partner-card${p.status === 'ENDED' ? ' is-ended' : ''}">
       <header class="partner-head">
@@ -427,6 +521,18 @@ export function mountPartners(app) {
     if (!partner) return;
     const path = `/api/v1/partners/${encodeURIComponent(partner.id)}`;
     const action = button.getAttribute('data-action');
+
+    if (action === 'qr') {
+      qrDialog(partner, {
+        manage,
+        onReplaced: async () => {
+          const result = await api('POST', `${path}/qr/replace`, {});
+          await load();
+          return result.partner;
+        },
+      });
+      return;
+    }
 
     if (action === 'rule') {
       const rule = partner.rule;

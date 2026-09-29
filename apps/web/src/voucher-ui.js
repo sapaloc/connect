@@ -25,6 +25,11 @@ export function voucherLink(code) {
   return `${location.origin}/v/${code}`;
 }
 
+/** @param {string} token partner QR token */
+export function referralLink(token) {
+  return `${location.origin}/r/${token}`;
+}
+
 /** @param {Pick<Voucher, 'discountType' | 'discountValue'>} voucher */
 export function discountText(voucher) {
   return voucher.discountType === 'PERCENT'
@@ -49,6 +54,14 @@ export function termsText(voucher) {
  */
 export function qrDataUrl(code, size = 320) {
   return QRCode.toDataURL(voucherLink(code), { width: size, margin: 1, errorCorrectionLevel: 'M' });
+}
+
+/**
+ * @param {string} token
+ * @param {number} [size]
+ */
+export function referralQrDataUrl(token, size = 320) {
+  return QRCode.toDataURL(referralLink(token), { width: size, margin: 1, errorCorrectionLevel: 'M' });
 }
 
 /** @param {string} src */
@@ -122,6 +135,91 @@ export async function voucherImage(voucher) {
   ctx.fillText('MyConnect', W / 2, 1315);
 
   return new Promise((resolve, reject) => canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error('toBlob failed'))), 'image/png'));
+}
+
+/**
+ * @typedef {{ token: string, merchantName: string, partnerName: string, discountRate: string | null }} PartnerQr
+ */
+
+/**
+ * A 1080x1350 PNG the partner prints or posts: merchant, discount, QR, "introduced by".
+ * @param {PartnerQr} qr
+ * @returns {Promise<Blob>}
+ */
+export async function partnerQrImage(qr) {
+  const W = 1080;
+  const H = 1350;
+  const canvas = document.createElement('canvas');
+  canvas.width = W;
+  canvas.height = H;
+  const ctx = /** @type {CanvasRenderingContext2D} */ (canvas.getContext('2d'));
+  await document.fonts?.ready;
+  const font = (/** @type {number} */ size, weight = 700) => `${weight} ${size}px "DM Sans", system-ui, sans-serif`;
+
+  ctx.fillStyle = '#F4EFE9';
+  ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = '#28332C';
+  ctx.fillRect(0, 0, W, 300);
+
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#FFFFFF';
+  ctx.font = font(34, 500);
+  ctx.fillText(t('referralOffer').toUpperCase(), W / 2, 90);
+  ctx.font = font(64);
+  ctx.fillText(fit(ctx, qr.merchantName, W - 120), W / 2, 180);
+  ctx.font = font(30, 500);
+  ctx.fillStyle = '#CFE3D6';
+  ctx.fillText(fit(ctx, t('introducedBy', { name: qr.partnerName }), W - 120), W / 2, 245);
+
+  if (qr.discountRate) {
+    ctx.fillStyle = '#C2410C';
+    ctx.font = font(96);
+    ctx.fillText(fit(ctx, t('percentOff', { value: ratePercent(qr.discountRate) }), W - 120), W / 2, 430);
+  }
+
+  const image = /** @type {HTMLImageElement} */ (await loadImage(await referralQrDataUrl(qr.token, 560)));
+  ctx.fillStyle = '#FFFFFF';
+  ctx.fillRect(W / 2 - 310, 490, 620, 620);
+  ctx.drawImage(image, W / 2 - 280, 520, 560, 560);
+
+  ctx.fillStyle = '#17262D';
+  ctx.font = font(44);
+  ctx.fillText(fit(ctx, t('scanToGetVoucher'), W - 120), W / 2, 1200);
+  ctx.font = font(30, 500);
+  ctx.fillStyle = '#4B5563';
+  ctx.fillText(fit(ctx, t('referralTerms', { days: 7 }), W - 120), W / 2, 1260);
+  ctx.font = font(26, 500);
+  ctx.fillText('MyConnect', W / 2, 1315);
+
+  return new Promise((resolve, reject) => canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error('toBlob failed'))), 'image/png'));
+}
+
+/**
+ * @param {PartnerQr} qr
+ * @returns {Promise<'shared' | 'downloaded' | 'cancelled'>}
+ */
+export async function sharePartnerQr(qr) {
+  const blob = await partnerQrImage(qr);
+  const slug = qr.partnerName
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[đĐ]/g, 'd')
+    .replace(/[^A-Za-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '')
+    .toLowerCase();
+  const file = new File([blob], `qr-${slug || 'partner'}.png`, { type: 'image/png' });
+  const text = `${qr.merchantName} · ${t('introducedBy', { name: qr.partnerName })} · ${referralLink(qr.token)}`;
+  if (navigator.canShare?.({ files: [file] })) {
+    try {
+      await navigator.share({ files: [file], title: qr.merchantName, text });
+      return 'shared';
+    } catch (error) {
+      if (/** @type {Error} */ (error).name === 'AbortError') return 'cancelled';
+    }
+  }
+  downloadBlob(blob, file.name);
+  await navigator.clipboard?.writeText(referralLink(qr.token)).catch(() => {});
+  return 'downloaded';
 }
 
 /**
