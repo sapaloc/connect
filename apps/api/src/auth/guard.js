@@ -1,5 +1,4 @@
 import { can } from '#domain';
-import { getPool } from '../db/pool.js';
 import { HttpError } from '../http/errors.js';
 import { clearSessionCookie, loadSession } from './session.js';
 
@@ -11,7 +10,7 @@ import { clearSessionCookie, loadSession } from './session.js';
  */
 export function authed(handler, { permission, allowNoRole = false } = {}) {
   return async (req, res, ctx) => {
-    const session = await loadSession(getPool(), req);
+    const session = await loadSession(req);
     if (!session) {
       throw new HttpError(401, 'UNAUTHENTICATED', 'Sign in required', {
         headers: { 'Set-Cookie': clearSessionCookie() },

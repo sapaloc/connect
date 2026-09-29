@@ -1,10 +1,11 @@
 import { parseArgs } from 'node:util';
 import { env, requireEnv } from '../config/env.js';
-import { resetSchema } from './reset.js';
+import { closeClient } from './mongo.js';
+import { resetDatabase } from './reset.js';
 import { assertCanSeed, seedOnce } from './seed-local.js';
 
 const USAGE = `Usage: pnpm db:reset --confirm <APP_ENV>
-Deletes ALL data (drops the public schema), re-runs migrations and seeds the test accounts.
+Deletes ALL data (drops the MONGODB_DB database), re-runs db:setup and seeds the test accounts.
 Allowed on local/test/uat only. --confirm must repeat the current APP_ENV, e.g. --confirm uat`;
 
 const { values } = parseArgs({ options: { confirm: { type: 'string' } } });
@@ -13,8 +14,12 @@ if (values.confirm !== env.appEnv) {
   process.exit(1);
 }
 assertCanSeed();
-requireEnv('databaseMigrationUrl');
+requireEnv('mongodbUri');
 
-await resetSchema(env.databaseMigrationUrl);
-console.log(`db:reset: schema recreated on ${env.appEnv}`);
-await seedOnce(env.databaseMigrationUrl);
+try {
+  await resetDatabase();
+  console.log(`db:reset: database "${env.mongodbDb}" recreated on ${env.appEnv}`);
+  await seedOnce();
+} finally {
+  await closeClient();
+}

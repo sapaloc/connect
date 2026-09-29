@@ -6,7 +6,7 @@ Partner referral, voucher and commission app for Number160.
 
 ```text
 apps/web/         Vite + Bootstrap static web (console, counter, my, public pages)
-apps/api/         Node 22 API (node:http + pg), runs locally via server.js
+apps/api/         Node 22 API (node:http + MongoDB driver), runs locally via server.js
 packages/domain/  Roles, permissions, password policy shared by web and API (import from '#domain')
 api/index.js      Vercel function entry that reuses apps/api
 ```
@@ -15,12 +15,26 @@ One `package.json` at the root holds every dependency and script.
 
 `apps/api/src/config/env.js` is the only file that reads environment variables. See `.env.example`.
 
+## Database
+
+MongoDB: Atlas (created from the Vercel Marketplace, which sets `MONGODB_URI`) on UAT, Docker locally.
+Transactions need a replica set, so the local container runs one:
+
+```bash
+docker run -d --name connect-mongo -p 27017:27017 mongo:7 --replSet rs0
+docker exec connect-mongo mongosh --eval 'rs.initiate()'
+```
+
+`pnpm db:setup` creates the collections with `$jsonSchema` validation, unique and TTL indexes
+(`apps/api/src/db/setup.js`). It is safe to re-run and runs on every UAT deploy. When a validator or index
+changes, bump `SCHEMA_VERSION` and keep old documents valid (add optional fields first, backfill, then require).
+
 ## Local development
 
 ```bash
 pnpm install
-cp .env.example .env      # point DATABASE_URL at a local Postgres
-pnpm migrate
+cp .env.example .env      # MONGODB_URI points at the local container
+pnpm db:setup
 pnpm dev                  # web http://localhost:5173, api http://localhost:3000
 ```
 
@@ -31,11 +45,11 @@ Health check: `GET /api/v1/health`.
 ```bash
 pnpm seed                 # local/test/uat (refused on production): Platform Admin, Tenant Admin, Manager, Staff,
                           # multi-role user (emails in apps/api/src/db/seed-local.js, password = SEED_PASSWORD)
-DATABASE_URL=<uat pooler url> pnpm user:create --email a@b.vn --name "Name" --role TENANT_ADMIN --tenant Number160
+MONGODB_URI=<uat uri> pnpm user:create --email a@b.vn --name "Name" --role TENANT_ADMIN --tenant Number160
 ```
 
 `pnpm seed` only creates the accounts the first time; later runs skip, so passwords and roles changed during
-testing are kept. UAT runs it after migrations on every deploy (password from the `UAT_SEED_PASSWORD` secret,
+testing are kept. UAT runs it after `db:setup` on every deploy (password from the `UAT_SEED_PASSWORD` secret,
 used only on that first run). Share the password privately, never in the repo.
 
 To start over with an empty database plus fresh test accounts (local/test/uat only, never production):
@@ -50,12 +64,10 @@ them by Zalo or email.
 
 ## Tests
 
-Integration tests use `.env.test` and drop the `public` schema of `connect_test`, so run them against a
-throwaway Postgres only (same image and port as CI `domain-tests`):
+Integration tests use `.env.test` and drop the `connect_test` database, so run them against the local
+container only (same image and replica set as CI `domain-tests`):
 
 ```bash
-docker run -d --name connect-postgres -p 5433:5432 \
-  -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=connect_test postgres:16-alpine
 pnpm test                 # all packages
 pnpm test:permission      # only @permission tests
 ```
@@ -66,5 +78,8 @@ pnpm test:permission      # only @permission tests
 
 ## Deploy secrets (GitHub Actions)
 
-`VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`, `UAT_DATABASE_MIGRATION_URL` (Supabase session pooler, port 5432),
+`VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`, `UAT_MONGODB_URI` (same value as `MONGODB_URI` on Vercel),
 `UAT_SEED_PASSWORD` (optional; test account password on UAT, must meet the password policy).
+
+Vercel env (Production): `MONGODB_URI` (from the Atlas integration), `MONGODB_DB=connect`, `SESSION_SECRET`,
+`APP_ENV=uat`, `APP_ORIGIN`, `MICROSITE_PUBLIC_BASE_URL`, `STORAGE_*` (Supabase Storage for files).

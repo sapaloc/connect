@@ -1,9 +1,11 @@
 import { canInvite, ROLES } from '#domain';
+import { randomUUID } from 'node:crypto';
 import { actorOf, recordAudit } from '../audit/audit.js';
 import { authed } from '../auth/guard.js';
 import { hashToken, newToken } from '../auth/tokens.js';
 import { INVITATION_TTL_MS, PASSWORD_RESET_TTL_MS } from '../config/security.js';
-import { getPool } from '../db/pool.js';
+import { grantRole } from '../db/bootstrap.js';
+import { collection } from '../db/mongo.js';
 import { withTransaction } from '../db/tx.js';
 import { HttpError } from '../http/errors.js';
 import { publicOrigin, readJson, stringField } from '../http/request.js';
@@ -28,34 +30,61 @@ function targetTenant(session, requested) {
     if (typeof requested !== 'string' || !UUID_PATTERN.test(requested)) {
       throw new HttpError(422, 'VALIDATION', 'tenantId is required', { details: { field: 'tenantId' } });
     }
-    return requested;
+    return requested.toLowerCase();
   }
   return /** @type {string} */ (session.tenantId);
+}
+
+/**
+ * A single-use link (invitation or password reset); opening a new one revokes the previous ones.
+ * @param {'invitations' | 'passwordResets'} kind
+ * @param {{ userId: string, ttlMs: number, createdBy: string }} input
+ * @param {import('mongodb').ClientSession} session
+ */
+async function issueLink(kind, { userId, ttlMs, createdBy }, session) {
+  const links = await collection(kind);
+  const now = new Date();
+  await links.updateMany({ userId, usedAt: null, revokedAt: null }, { $set: { revokedAt: now } }, { session });
+  const token = newToken();
+  const linkId = randomUUID();
+  const expiresAt = new Date(now.getTime() + ttlMs);
+  await links.insertOne(
+    { _id: linkId, userId, tokenHash: hashToken(token), expiresAt, usedAt: null, revokedAt: null, createdBy, createdAt: now },
+    { session },
+  );
+  return { linkId, token, expiresAt };
 }
 
 /** @type {import('../http/router.js').Handler} */
 async function listUsers(req, res, ctx) {
   const session = sessionOf(ctx);
   const tenantId = targetTenant(session, new URL(req.url ?? '/', 'http://localhost').searchParams.get('tenantId'));
-  const { rows } = await getPool().query(
-    `SELECT u.user_id, u.email_or_login, u.display_name, u.account_status,
-            array_agg(ra.role ORDER BY ra.role) AS roles,
-            EXISTS (SELECT 1 FROM invitation i WHERE i.user_id = u.user_id AND i.used_at IS NULL
-                      AND i.revoked_at IS NULL AND i.expires_at > now()) AS invitation_open
-       FROM user_account u
-       JOIN role_assignment ra ON ra.user_id = u.user_id AND ra.status = 'ACTIVE' AND ra.tenant_id = $1
-      GROUP BY u.user_id
-      ORDER BY u.display_name`,
-    [tenantId],
-  );
+  const users = await collection('users');
+  const members = await users
+    .find(
+      { roles: { $elemMatch: { tenantId, status: 'ACTIVE' } } },
+      { projection: { email: 1, displayName: 1, status: 1, roles: 1 }, sort: { displayName: 1 } },
+    )
+    .toArray();
+  const invitations = await collection('invitations');
+  const open = await invitations.distinct('userId', {
+    userId: { $in: members.map((user) => user._id) },
+    usedAt: null,
+    revokedAt: null,
+    expiresAt: { $gt: new Date() },
+  });
+  const withOpenInvitation = new Set(open);
   sendJson(res, 200, {
-    users: rows.map((row) => ({
-      id: row.user_id,
-      email: row.email_or_login,
-      displayName: row.display_name,
-      status: row.account_status,
-      roles: row.roles,
-      invitationOpen: row.invitation_open,
+    users: members.map((user) => ({
+      id: user._id,
+      email: user.email,
+      displayName: user.displayName,
+      status: user.status,
+      roles: user.roles
+        .filter((/** @type {any} */ assignment) => assignment.tenantId === tenantId && assignment.status === 'ACTIVE')
+        .map((/** @type {any} */ assignment) => assignment.role)
+        .sort(),
+      invitationOpen: withOpenInvitation.has(user._id),
     })),
   });
 }
@@ -83,73 +112,65 @@ async function inviteUser(req, res, ctx) {
     throw new HttpError(403, 'FORBIDDEN', 'You cannot invite this role');
   }
 
-  const result = await withTransaction(async (client) => {
-    const tenant = await client.query(`SELECT 1 FROM tenant WHERE tenant_id = $1 AND status = 'ACTIVE'`, [tenantId]);
-    if (!tenant.rowCount) throw new HttpError(404, 'TENANT_NOT_FOUND', 'Tenant not found');
+  const result = await withTransaction(async (tx) => {
+    const tenants = await collection('tenants');
+    if (!(await tenants.countDocuments({ _id: tenantId, status: 'ACTIVE' }, { session: tx, limit: 1 }))) {
+      throw new HttpError(404, 'TENANT_NOT_FOUND', 'Tenant not found');
+    }
 
-    const existing = await client.query(
-      'SELECT user_id, account_status FROM user_account WHERE email_or_login = $1 FOR UPDATE',
-      [email],
-    );
-    let user = existing.rows[0];
-    if (user && user.account_status !== 'INVITED' && user.account_status !== 'ACTIVE') {
+    const users = await collection('users');
+    const now = new Date();
+    let user = await users.findOne({ email }, { session: tx, projection: { status: 1 } });
+    if (user && user.status !== 'INVITED' && user.status !== 'ACTIVE') {
       throw new HttpError(409, 'USER_NOT_INVITABLE', 'This account is blocked or ended');
     }
     if (!user) {
-      const created = await client.query(
-        `INSERT INTO user_account (email_or_login, display_name, preferred_language)
-         VALUES ($1, $2, $3) RETURNING user_id, account_status`,
-        [email, displayName, language],
+      user = { _id: randomUUID(), status: 'INVITED' };
+      await users.insertOne(
+        {
+          _id: user._id,
+          email,
+          displayName,
+          status: 'INVITED',
+          preferredLanguage: language,
+          passwordHash: null,
+          passwordChangedAt: null,
+          roles: [],
+          createdAt: now,
+          updatedAt: now,
+        },
+        { session: tx },
       );
-      user = created.rows[0];
     }
-
-    await client.query(
-      `INSERT INTO role_assignment (user_id, role, scope_type, tenant_id, created_by)
-       SELECT $1, $2, 'TENANT', $3, $4
-        WHERE NOT EXISTS (SELECT 1 FROM role_assignment WHERE user_id = $1 AND role = $2
-                            AND tenant_id = $3 AND status = 'ACTIVE')`,
-      [user.user_id, role, tenantId, session.userId],
-    );
+    await grantRole(user._id, { role, tenantId, createdBy: session.userId }, { session: tx });
 
     // An active account just gets the extra role; it signs in with its current password.
-    if (user.account_status === 'ACTIVE') {
-      await recordAudit(client, {
-        ...actorOf(ctx),
-        tenantId,
-        eventType: 'ROLE_GRANTED',
-        entityType: 'user_account',
-        entityId: user.user_id,
-        after: { role },
-      });
-      return { userId: user.user_id, status: 'ACTIVE', inviteUrl: null, expiresAt: null };
+    if (user.status === 'ACTIVE') {
+      await recordAudit(
+        { ...actorOf(ctx), tenantId, eventType: 'ROLE_GRANTED', entityType: 'user_account', entityId: user._id, after: { role } },
+        { session: tx },
+      );
+      return { userId: user._id, status: 'ACTIVE', inviteUrl: null, expiresAt: null };
     }
 
-    await client.query(
-      'UPDATE invitation SET revoked_at = now() WHERE user_id = $1 AND used_at IS NULL AND revoked_at IS NULL',
-      [user.user_id],
+    const link = await issueLink('invitations', { userId: user._id, ttlMs: INVITATION_TTL_MS, createdBy: session.userId }, tx);
+    await recordAudit(
+      {
+        ...actorOf(ctx),
+        tenantId,
+        eventType: 'INVITATION_CREATED',
+        entityType: 'invitation',
+        entityId: link.linkId,
+        after: { email, role },
+      },
+      { session: tx },
     );
-    const token = newToken();
-    const expiresAt = new Date(Date.now() + INVITATION_TTL_MS);
-    const invitation = await client.query(
-      `INSERT INTO invitation (user_id, token_hash, expires_at, created_by)
-       VALUES ($1, $2, $3, $4) RETURNING invitation_id`,
-      [user.user_id, hashToken(token), expiresAt, session.userId],
-    );
-    await recordAudit(client, {
-      ...actorOf(ctx),
-      tenantId,
-      eventType: 'INVITATION_CREATED',
-      entityType: 'invitation',
-      entityId: invitation.rows[0].invitation_id,
-      after: { email, role },
-    });
     // Token in the URL fragment: never sent to the server or leaked through Referer / access logs.
     return {
-      userId: user.user_id,
+      userId: user._id,
       status: 'INVITED',
-      inviteUrl: `${publicOrigin(req)}/invite#${token}`,
-      expiresAt: expiresAt.toISOString(),
+      inviteUrl: `${publicOrigin(req)}/invite#${link.token}`,
+      expiresAt: link.expiresAt.toISOString(),
     };
   });
 
@@ -159,46 +180,45 @@ async function inviteUser(req, res, ctx) {
 /** @type {import('../http/router.js').Handler} */
 async function issuePasswordReset(req, res, ctx) {
   const session = sessionOf(ctx);
-  const userId = ctx.params.userId;
+  const userId = ctx.params.userId.toLowerCase();
   if (!UUID_PATTERN.test(userId)) throw new HttpError(404, 'USER_NOT_FOUND', 'User not found');
 
-  const result = await withTransaction(async (client) => {
+  const result = await withTransaction(async (tx) => {
     // Tenant Admin: only people with a tenant role in its own tenant. Platform Admin: any tenant role.
-    const scope = await client.query(
-      `SELECT tenant_id FROM role_assignment
-        WHERE user_id = $1 AND status = 'ACTIVE' AND role = ANY($3) AND ($2::uuid IS NULL OR tenant_id = $2)
-        LIMIT 1`,
-      [userId, session.role === ROLES.PLATFORM_ADMIN ? null : session.tenantId, TENANT_ROLES],
+    const inScope = {
+      status: 'ACTIVE',
+      role: { $in: TENANT_ROLES },
+      ...(session.role === ROLES.PLATFORM_ADMIN ? {} : { tenantId: session.tenantId }),
+    };
+    const users = await collection('users');
+    const target = await users.findOne(
+      { _id: userId, roles: { $elemMatch: inScope } },
+      { session: tx, projection: { status: 1, roles: 1 } },
     );
-    if (!scope.rowCount) throw new HttpError(404, 'USER_NOT_FOUND', 'User not found');
-    const { rows } = await client.query('SELECT user_id, account_status FROM user_account WHERE user_id = $1 FOR UPDATE', [
-      userId,
-    ]);
-    const target = { ...rows[0], tenant_id: scope.rows[0].tenant_id };
-    if (target.account_status !== 'ACTIVE') {
+    if (!target) throw new HttpError(404, 'USER_NOT_FOUND', 'User not found');
+    if (target.status !== 'ACTIVE') {
       throw new HttpError(409, 'USER_NOT_ACTIVE', 'Only active accounts can reset; re-send the invitation instead');
     }
+    const targetTenantId = target.roles.find(
+      (/** @type {any} */ assignment) =>
+        assignment.status === 'ACTIVE' &&
+        TENANT_ROLES.includes(assignment.role) &&
+        (session.role === ROLES.PLATFORM_ADMIN || assignment.tenantId === session.tenantId),
+    ).tenantId;
 
-    await client.query(
-      'UPDATE password_reset SET revoked_at = now() WHERE user_id = $1 AND used_at IS NULL AND revoked_at IS NULL',
-      [userId],
+    const link = await issueLink('passwordResets', { userId, ttlMs: PASSWORD_RESET_TTL_MS, createdBy: session.userId }, tx);
+    await recordAudit(
+      {
+        ...actorOf(ctx),
+        tenantId: session.tenantId ?? targetTenantId,
+        eventType: 'PASSWORD_RESET_ISSUED',
+        entityType: 'password_reset',
+        entityId: link.linkId,
+        after: { userId },
+      },
+      { session: tx },
     );
-    const token = newToken();
-    const expiresAt = new Date(Date.now() + PASSWORD_RESET_TTL_MS);
-    const reset = await client.query(
-      `INSERT INTO password_reset (user_id, token_hash, expires_at, created_by)
-       VALUES ($1, $2, $3, $4) RETURNING password_reset_id`,
-      [userId, hashToken(token), expiresAt, session.userId],
-    );
-    await recordAudit(client, {
-      ...actorOf(ctx),
-      tenantId: session.tenantId ?? target.tenant_id,
-      eventType: 'PASSWORD_RESET_ISSUED',
-      entityType: 'password_reset',
-      entityId: reset.rows[0].password_reset_id,
-      after: { userId },
-    });
-    return { resetUrl: `${publicOrigin(req)}/reset#${token}`, expiresAt: expiresAt.toISOString() };
+    return { resetUrl: `${publicOrigin(req)}/reset#${link.token}`, expiresAt: link.expiresAt.toISOString() };
   });
 
   sendJson(res, 201, result);
