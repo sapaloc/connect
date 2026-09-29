@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       confirm:
-        description: 'Deletes ALL UAT data, re-runs migrations and seeds test accounts. Type: reset uat'
+        description: 'Deletes ALL UAT data, re-runs db:setup and seeds test accounts. Type: reset uat'
         required: true
 
 permissions:
@@ -42,6 +42,7 @@ jobs:
       - name: Reset
         env:
           APP_ENV: uat
-          DATABASE_MIGRATION_URL: ${{ secrets.UAT_DATABASE_MIGRATION_URL }}
+          MONGODB_URI: ${{ secrets.UAT_MONGODB_URI }}
+          MONGODB_DB: connect
           SEED_PASSWORD: ${{ secrets.UAT_SEED_PASSWORD }}
         run: pnpm db:reset --confirm uat

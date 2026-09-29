@@ -51,20 +51,25 @@ jobs:
     name: domain-tests
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    services:
-      postgres:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: connect_test
-        ports:
-          - 5433:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
     steps:
+      # Service containers cannot pass --replSet, and transactions need a replica set.
+      - name: Start MongoDB replica set
+        run: |
+          docker run -d --name connect-mongo -p 27017:27017 mongo:7 --replSet rs0
+          for i in $(seq 1 30); do
+            if docker exec connect-mongo mongosh --quiet --eval 'try { rs.status().ok } catch (e) { rs.initiate().ok }'; then
+              break
+            fi
+            sleep 2
+          done
+          for i in $(seq 1 30); do
+            state=$(docker exec connect-mongo mongosh --quiet --eval 'rs.status().myState' || true)
+            [ "$state" = "1" ] && exit 0
+            sleep 1
+          done
+          echo "::error::MongoDB replica set did not become primary"
+          exit 1
+
       - uses: actions/checkout@v4
 
       - uses: pnpm/action-setup@v4
@@ -77,6 +82,6 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
 
-      # Uses .env.test: throwaway service database, fake secrets.
+      # Uses .env.test: throwaway local MongoDB, fake secrets.
       - name: Tests (@money, @permission, unit + integration)
         run: pnpm test

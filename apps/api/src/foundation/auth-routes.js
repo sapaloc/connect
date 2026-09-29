@@ -13,7 +13,7 @@ import {
 } from '../auth/session.js';
 import { hashToken } from '../auth/tokens.js';
 import { RATE_LIMITS } from '../config/security.js';
-import { getPool } from '../db/pool.js';
+import { collection } from '../db/mongo.js';
 import { withTransaction } from '../db/tx.js';
 import { HttpError } from '../http/errors.js';
 import { clientIp, readJson, stringField } from '../http/request.js';
@@ -63,72 +63,71 @@ async function login(req, res, ctx) {
   const email = normalizeEmail(body.email);
   const password = typeof body.password === 'string' ? body.password : '';
   const ip = clientIp(req);
-  const db = getPool();
   const accountKey = `login:account:${email}:${ip}`;
 
-  await consume(db, `login:ip:${ip}`, RATE_LIMITS.loginIp);
-  await assertBelow(db, accountKey, RATE_LIMITS.loginAccount);
+  await consume(`login:ip:${ip}`, RATE_LIMITS.loginIp);
+  await assertBelow(accountKey, RATE_LIMITS.loginAccount);
 
-  const { rows } = await db.query(
-    `SELECT user_id, email_or_login, display_name, preferred_language, account_status, password_hash
-       FROM user_account WHERE email_or_login = $1`,
-    [email],
-  );
-  const account = rows[0];
-  const passwordOk = await verifyPassword(password, account?.password_hash);
+  const users = await collection('users');
+  const account = email
+    ? await users.findOne(
+        { email },
+        { projection: { email: 1, displayName: 1, preferredLanguage: 1, status: 1, passwordHash: 1 } },
+      )
+    : null;
+  const passwordOk = await verifyPassword(password, account?.passwordHash);
 
-  if (!account || !passwordOk || account.account_status !== 'ACTIVE') {
-    await recordFailure(db, accountKey, RATE_LIMITS.loginAccount);
-    await recordAudit(db, {
+  if (!account || !passwordOk || account.status !== 'ACTIVE') {
+    await recordFailure(accountKey, RATE_LIMITS.loginAccount);
+    await recordAudit({
       eventType: 'SIGN_IN_FAILED',
       entityType: 'user_account',
-      entityId: account?.user_id ?? null,
+      entityId: account?._id ?? null,
       after: { email, ip },
       correlationId: ctx.requestId,
     });
     throw invalidCredentials();
   }
 
-  const roles = await activeRoles(db, account.user_id);
+  const roles = await activeRoles(account._id);
   if (roles.length === 0) throw new HttpError(403, 'NO_ACTIVE_ROLE', 'This account has no active role');
 
   // One role: use it. Several: the user must choose; never pick the highest (C3).
   const chosen = roles.length === 1 ? roles[0] : null;
-  const { cookie } = await createSession(db, {
-    userId: account.user_id,
+  const { cookie } = await createSession({
+    userId: account._id,
     roleAssignmentId: chosen?.roleAssignmentId ?? null,
     role: chosen?.role ?? null,
     ip,
     userAgent: String(req.headers['user-agent'] ?? ''),
   });
-  await clear(db, accountKey);
-  await recordAudit(db, {
+  await clear(accountKey);
+  await recordAudit({
     eventType: 'SIGN_IN',
     tenantId: chosen?.tenantId ?? null,
-    actorUserId: account.user_id,
+    actorUserId: account._id,
     actorRoleAssignmentId: chosen?.roleAssignmentId ?? null,
     entityType: 'user_account',
-    entityId: account.user_id,
+    entityId: account._id,
     after: { role: chosen?.role ?? null, ip },
     correlationId: ctx.requestId,
   });
 
   const user = {
-    userId: account.user_id,
-    email: account.email_or_login,
-    displayName: account.display_name,
-    preferredLanguage: account.preferred_language,
+    userId: account._id,
+    email: account.email,
+    displayName: account.displayName,
+    preferredLanguage: account.preferredLanguage,
   };
   sendJson(res, 200, profile(user, roles, chosen?.roleAssignmentId ?? null), { 'Set-Cookie': cookie });
 }
 
 /** @type {import('../http/router.js').Handler} */
 async function logout(req, res, ctx) {
-  const db = getPool();
-  const session = await loadSession(db, req);
+  const session = await loadSession(req);
   if (session) {
-    await revokeSession(db, session.sessionId);
-    await recordAudit(db, {
+    await revokeSession(session.sessionId);
+    await recordAudit({
       eventType: 'SIGN_OUT',
       tenantId: session.tenantId,
       actorUserId: session.userId,
@@ -144,7 +143,7 @@ async function logout(req, res, ctx) {
 /** @type {import('../http/router.js').Handler} */
 async function me(_req, res, ctx) {
   const session = /** @type {import('../auth/session.js').Session} */ (ctx.session);
-  const roles = await activeRoles(getPool(), session.userId);
+  const roles = await activeRoles(session.userId);
   sendJson(res, 200, profile(session, roles, session.roleAssignmentId));
 }
 
@@ -153,32 +152,37 @@ async function selectRole(req, res, ctx) {
   const session = /** @type {import('../auth/session.js').Session} */ (ctx.session);
   const body = await readJson(req);
   const roleAssignmentId = stringField(body, 'roleAssignmentId', { max: 64 });
-  const db = getPool();
-  const roles = await activeRoles(db, session.userId);
+  const roles = await activeRoles(session.userId);
   const chosen = roles.find((option) => option.roleAssignmentId === roleAssignmentId);
   if (!chosen) throw new HttpError(403, 'ROLE_NOT_AVAILABLE', 'This role is not available');
 
   // New session ID on every role change (§8.1).
-  const { cookie } = await withTransaction(async (client) => {
-    await revokeSession(client, session.sessionId);
-    const created = await createSession(client, {
-      userId: session.userId,
-      roleAssignmentId: chosen.roleAssignmentId,
-      role: chosen.role,
-      ip: clientIp(req),
-      userAgent: String(req.headers['user-agent'] ?? ''),
-    });
-    await recordAudit(client, {
-      eventType: 'ROLE_SELECTED',
-      tenantId: chosen.tenantId,
-      actorUserId: session.userId,
-      actorRoleAssignmentId: chosen.roleAssignmentId,
-      entityType: 'role_assignment',
-      entityId: chosen.roleAssignmentId,
-      before: { role: session.role },
-      after: { role: chosen.role },
-      correlationId: ctx.requestId,
-    });
+  const { cookie } = await withTransaction(async (tx) => {
+    await revokeSession(session.sessionId, { session: tx });
+    const created = await createSession(
+      {
+        userId: session.userId,
+        roleAssignmentId: chosen.roleAssignmentId,
+        role: chosen.role,
+        ip: clientIp(req),
+        userAgent: String(req.headers['user-agent'] ?? ''),
+      },
+      { session: tx },
+    );
+    await recordAudit(
+      {
+        eventType: 'ROLE_SELECTED',
+        tenantId: chosen.tenantId,
+        actorUserId: session.userId,
+        actorRoleAssignmentId: chosen.roleAssignmentId,
+        entityType: 'role_assignment',
+        entityId: chosen.roleAssignmentId,
+        before: { role: session.role },
+        after: { role: chosen.role },
+        correlationId: ctx.requestId,
+      },
+      { session: tx },
+    );
     return created;
   });
   sendJson(res, 200, profile(session, roles, chosen.roleAssignmentId), { 'Set-Cookie': cookie });
@@ -188,34 +192,54 @@ const invalidInvitation = () =>
   new HttpError(410, 'INVITATION_INVALID', 'This invitation link is no longer valid. Ask your admin for a new one.');
 
 /**
- * @param {import('pg').Pool | import('pg').PoolClient} db
+ * An unused, unexpired link whose user is in `userStatus`; null otherwise.
+ * @param {'invitations' | 'passwordResets'} kind
  * @param {string} token
- * @param {boolean} lock
+ * @param {string} userStatus
+ * @param {{ session?: import('mongodb').ClientSession }} [options]
  */
-async function findOpenInvitation(db, token, lock) {
-  const { rows } = await db.query(
-    `SELECT i.invitation_id, i.user_id, u.email_or_login, u.display_name, u.preferred_language
-       FROM invitation i
-       JOIN user_account u ON u.user_id = i.user_id
-      WHERE i.token_hash = $1 AND i.used_at IS NULL AND i.revoked_at IS NULL
-        AND i.expires_at > now() AND u.account_status = 'INVITED'
-      ${lock ? 'FOR UPDATE OF i, u' : ''}`,
-    [hashToken(token)],
+async function findOpenLink(kind, token, userStatus, options = {}) {
+  const links = await collection(kind);
+  const link = await links.findOne(
+    { tokenHash: hashToken(token), usedAt: null, revokedAt: null, expiresAt: { $gt: new Date() } },
+    options,
   );
-  return rows[0];
+  if (!link) return null;
+  const users = await collection('users');
+  const user = await users.findOne(
+    { _id: link.userId, status: userStatus },
+    { ...options, projection: { email: 1, displayName: 1, preferredLanguage: 1 } },
+  );
+  return user ? { link, user } : null;
+}
+
+/**
+ * Marks the link used only if it is still open, so two concurrent submits cannot both succeed.
+ * @param {'invitations' | 'passwordResets'} kind
+ * @param {string} linkId
+ * @param {import('mongodb').ClientSession} session
+ */
+async function markUsed(kind, linkId, session) {
+  const links = await collection(kind);
+  const { modifiedCount } = await links.updateOne(
+    { _id: linkId, usedAt: null, revokedAt: null },
+    { $set: { usedAt: new Date() } },
+    { session },
+  );
+  return modifiedCount === 1;
 }
 
 /** @type {import('../http/router.js').Handler} */
 async function inspectInvitation(req, res) {
   const body = await readJson(req);
   const token = stringField(body, 'token', { max: 128 });
-  await consume(getPool(), `token:ip:${clientIp(req)}`, RATE_LIMITS.tokenIp);
-  const invitation = await findOpenInvitation(getPool(), token, false);
-  if (!invitation) throw invalidInvitation();
+  await consume(`token:ip:${clientIp(req)}`, RATE_LIMITS.tokenIp);
+  const found = await findOpenLink('invitations', token, 'INVITED');
+  if (!found) throw invalidInvitation();
   sendJson(res, 200, {
-    email: invitation.email_or_login,
-    displayName: invitation.display_name,
-    preferredLanguage: invitation.preferred_language,
+    email: found.user.email,
+    displayName: found.user.displayName,
+    preferredLanguage: found.user.preferredLanguage,
   });
 }
 
@@ -224,27 +248,32 @@ async function acceptInvitation(req, res, ctx) {
   const body = await readJson(req);
   const token = stringField(body, 'token', { max: 128 });
   const password = stringField(body, 'password', { max: 256 });
-  await consume(getPool(), `token:ip:${clientIp(req)}`, RATE_LIMITS.tokenIp);
+  await consume(`token:ip:${clientIp(req)}`, RATE_LIMITS.tokenIp);
   assertPasswordPolicy(password);
   const passwordHash = await hashPassword(password);
 
-  const email = await withTransaction(async (client) => {
-    const invitation = await findOpenInvitation(client, token, true);
-    if (!invitation) throw invalidInvitation();
-    await client.query(
-      `UPDATE user_account SET password_hash = $2, password_changed_at = now(), account_status = 'ACTIVE',
-              updated_at = now() WHERE user_id = $1`,
-      [invitation.user_id, passwordHash],
+  const email = await withTransaction(async (session) => {
+    const found = await findOpenLink('invitations', token, 'INVITED', { session });
+    if (!found || !(await markUsed('invitations', found.link._id, session))) throw invalidInvitation();
+    const now = new Date();
+    const users = await collection('users');
+    const { modifiedCount } = await users.updateOne(
+      { _id: found.user._id, status: 'INVITED' },
+      { $set: { passwordHash, passwordChangedAt: now, status: 'ACTIVE', updatedAt: now } },
+      { session },
     );
-    await client.query('UPDATE invitation SET used_at = now() WHERE invitation_id = $1', [invitation.invitation_id]);
-    await recordAudit(client, {
-      eventType: 'INVITATION_ACCEPTED',
-      actorUserId: invitation.user_id,
-      entityType: 'invitation',
-      entityId: invitation.invitation_id,
-      correlationId: ctx.requestId,
-    });
-    return invitation.email_or_login;
+    if (modifiedCount !== 1) throw invalidInvitation();
+    await recordAudit(
+      {
+        eventType: 'INVITATION_ACCEPTED',
+        actorUserId: found.user._id,
+        entityType: 'invitation',
+        entityId: found.link._id,
+        correlationId: ctx.requestId,
+      },
+      { session },
+    );
+    return found.user.email;
   });
   sendJson(res, 200, { ok: true, email });
 }
@@ -257,19 +286,16 @@ async function acceptInvitation(req, res, ctx) {
 async function requestPasswordReset(req, res, ctx) {
   const body = await readJson(req);
   const email = normalizeEmail(body.email);
-  const db = getPool();
-  await consume(db, `reset:ip:${clientIp(req)}`, RATE_LIMITS.resetRequestIp);
-  await consume(db, `reset:email:${email}`, RATE_LIMITS.resetRequestEmail);
+  await consume(`reset:ip:${clientIp(req)}`, RATE_LIMITS.resetRequestIp);
+  await consume(`reset:email:${email}`, RATE_LIMITS.resetRequestEmail);
 
-  const { rows } = await db.query(
-    `SELECT user_id FROM user_account WHERE email_or_login = $1 AND account_status = 'ACTIVE'`,
-    [email],
-  );
-  if (rows[0]) {
-    await recordAudit(db, {
+  const users = await collection('users');
+  const user = email ? await users.findOne({ email, status: 'ACTIVE' }, { projection: { _id: 1 } }) : null;
+  if (user) {
+    await recordAudit({
       eventType: 'PASSWORD_RESET_REQUESTED',
       entityType: 'user_account',
-      entityId: rows[0].user_id,
+      entityId: user._id,
       correlationId: ctx.requestId,
     });
   }
@@ -281,44 +307,33 @@ async function confirmPasswordReset(req, res, ctx) {
   const body = await readJson(req);
   const token = stringField(body, 'token', { max: 128 });
   const password = stringField(body, 'password', { max: 256 });
-  await consume(getPool(), `token:ip:${clientIp(req)}`, RATE_LIMITS.tokenIp);
+  await consume(`token:ip:${clientIp(req)}`, RATE_LIMITS.tokenIp);
   assertPasswordPolicy(password);
   const passwordHash = await hashPassword(password);
 
-  const email = await withTransaction(async (client) => {
-    const { rows } = await client.query(
-      `SELECT r.password_reset_id, r.user_id, u.email_or_login
-         FROM password_reset r
-         JOIN user_account u ON u.user_id = r.user_id
-        WHERE r.token_hash = $1 AND r.used_at IS NULL AND r.revoked_at IS NULL
-          AND r.expires_at > now() AND u.account_status = 'ACTIVE'
-        FOR UPDATE OF r, u`,
-      [hashToken(token)],
-    );
-    const reset = rows[0];
-    if (!reset) {
+  const email = await withTransaction(async (session) => {
+    const found = await findOpenLink('passwordResets', token, 'ACTIVE', { session });
+    if (!found || !(await markUsed('passwordResets', found.link._id, session))) {
       throw new HttpError(410, 'RESET_INVALID', 'This reset link is no longer valid. Ask your admin for a new one.');
     }
-    await client.query(
-      'UPDATE user_account SET password_hash = $2, password_changed_at = now(), updated_at = now() WHERE user_id = $1',
-      [reset.user_id, passwordHash],
+    const userId = found.user._id;
+    const now = new Date();
+    const users = await collection('users');
+    await users.updateOne({ _id: userId }, { $set: { passwordHash, passwordChangedAt: now, updatedAt: now } }, { session });
+    const resets = await collection('passwordResets');
+    await resets.updateMany({ userId, usedAt: null, revokedAt: null }, { $set: { revokedAt: now } }, { session });
+    await revokeUserSessions(userId, { session });
+    await recordAudit(
+      {
+        eventType: 'PASSWORD_RESET_COMPLETED',
+        actorUserId: userId,
+        entityType: 'user_account',
+        entityId: userId,
+        correlationId: ctx.requestId,
+      },
+      { session },
     );
-    await client.query('UPDATE password_reset SET used_at = now() WHERE password_reset_id = $1', [
-      reset.password_reset_id,
-    ]);
-    await client.query(
-      'UPDATE password_reset SET revoked_at = now() WHERE user_id = $1 AND used_at IS NULL AND revoked_at IS NULL',
-      [reset.user_id],
-    );
-    await revokeUserSessions(client, reset.user_id);
-    await recordAudit(client, {
-      eventType: 'PASSWORD_RESET_COMPLETED',
-      actorUserId: reset.user_id,
-      entityType: 'user_account',
-      entityId: reset.user_id,
-      correlationId: ctx.requestId,
-    });
-    return reset.email_or_login;
+    return found.user.email;
   });
   sendJson(res, 200, { ok: true, email }, { 'Set-Cookie': clearSessionCookie() });
 }

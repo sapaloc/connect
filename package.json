@@ -15,7 +15,7 @@
     "dev:web": "vite apps/web",
     "start": "node apps/api/server.js",
     "build": "vite build apps/web",
-    "migrate": "node --env-file-if-exists=.env apps/api/src/db/migrate.js",
+    "db:setup": "node --env-file-if-exists=.env apps/api/src/db/setup.js",
     "seed": "node --env-file-if-exists=.env apps/api/src/db/seed-local.js",
     "db:reset": "node --env-file-if-exists=.env apps/api/src/db/db-reset.js",
     "user:create": "node --env-file-if-exists=.env apps/api/src/db/create-user.js",
@@ -25,7 +25,7 @@
   },
   "dependencies": {
     "bootstrap": "^5.3.3",
-    "pg": "^8.13.1"
+    "mongodb": "^7.6.0"
   },
   "devDependencies": {
     "vite": "^6.0.0"

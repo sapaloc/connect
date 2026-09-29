@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
+import { readdir, readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { after, before, describe, it } from 'node:test';
-import { getPool } from '../src/db/pool.js';
+import { collection } from '../src/db/mongo.js';
 import { Agent, PASSWORD, resetDatabase, startServer, tokenFromLink } from './helpers.js';
 
 const NEW_PASSWORD = 'Welcome#2026';
@@ -188,11 +190,11 @@ describe('@permission invitation', () => {
     const reuse = await guest.post('/api/v1/auth/invitations/accept', { token, password: NEW_PASSWORD });
     assert.equal(reuse.status, 410);
 
-    const audit = await getPool().query(
-      `SELECT event_type FROM audit_event WHERE event_type IN ('INVITATION_CREATED', 'INVITATION_ACCEPTED')`,
-    );
-    assert.equal(audit.rowCount, 2);
-    assert.doesNotMatch(JSON.stringify(audit.rows), new RegExp(token));
+    const audit = await (await collection('auditEvents'))
+      .find({ eventType: { $in: ['INVITATION_CREATED', 'INVITATION_ACCEPTED'] } })
+      .toArray();
+    assert.equal(audit.length, 2);
+    assert.doesNotMatch(JSON.stringify(audit), new RegExp(token));
   });
 
   it('an expired invitation creates no account (E2E-S1-02)', async () => {
@@ -203,17 +205,18 @@ describe('@permission invitation', () => {
       displayName: 'Late',
       role: 'MANAGER',
     });
-    await getPool().query(`UPDATE invitation SET expires_at = now() - interval '1 minute' WHERE user_id = $1`, [
-      invite.body.userId,
-    ]);
+    await (await collection('invitations')).updateMany(
+      { userId: invite.body.userId },
+      { $set: { expiresAt: new Date(Date.now() - 60_000) } },
+    );
     const res = await agent().post('/api/v1/auth/invitations/accept', {
       token: tokenFromLink(invite.body.inviteUrl),
       password: NEW_PASSWORD,
     });
     assert.equal(res.status, 410);
     assert.equal(res.body.error.code, 'INVITATION_INVALID');
-    const user = await getPool().query('SELECT account_status FROM user_account WHERE user_id = $1', [invite.body.userId]);
-    assert.equal(user.rows[0].account_status, 'INVITED');
+    const user = await (await collection('users')).findOne({ _id: invite.body.userId });
+    assert.equal(user?.status, 'INVITED');
   });
 
   it('re-sending an invitation revokes the previous link', async () => {
@@ -280,10 +283,9 @@ describe('@permission sessions and rate limits', () => {
   it('an expired session is rejected', async () => {
     const staff = agent();
     const login = await staff.login('staff@number160.local');
-    await getPool().query(
-      `UPDATE session SET idle_expires_at = now() - interval '1 second'
-        WHERE user_id = $1 AND revoked_at IS NULL`,
-      [login.body.user.id],
+    await (await collection('sessions')).updateMany(
+      { userId: login.body.user.id, revokedAt: null },
+      { $set: { idleExpiresAt: new Date(Date.now() - 1000) } },
     );
     assert.equal((await staff.get('/api/v1/auth/me')).status, 401);
   });
@@ -302,7 +304,7 @@ describe('@permission sessions and rate limits', () => {
     });
     const user = agent();
     await user.login('blocked@number160.local', NEW_PASSWORD);
-    await getPool().query(`UPDATE user_account SET account_status = 'BLOCKED' WHERE user_id = $1`, [invite.body.userId]);
+    await (await collection('users')).updateOne({ _id: invite.body.userId }, { $set: { status: 'BLOCKED' } });
     assert.equal((await user.get('/api/v1/auth/me')).status, 401);
     assert.equal((await agent().login('blocked@number160.local', NEW_PASSWORD)).status, 401);
   });
@@ -320,15 +322,39 @@ describe('@permission sessions and rate limits', () => {
   });
 
   it('records sign-in audit events without secrets', async () => {
-    const { rows } = await getPool().query(
-      `SELECT event_type, after_json FROM audit_event WHERE event_type IN ('SIGN_IN', 'SIGN_IN_FAILED')`,
-    );
-    assert.ok(rows.some((row) => row.event_type === 'SIGN_IN'));
-    assert.ok(rows.some((row) => row.event_type === 'SIGN_IN_FAILED'));
+    const rows = await (await collection('auditEvents'))
+      .find({ eventType: { $in: ['SIGN_IN', 'SIGN_IN_FAILED'] } }, { projection: { eventType: 1, after: 1 } })
+      .toArray();
+    assert.ok(rows.some((row) => row.eventType === 'SIGN_IN'));
+    assert.ok(rows.some((row) => row.eventType === 'SIGN_IN_FAILED'));
     assert.doesNotMatch(JSON.stringify(rows), new RegExp(PASSWORD.replace(/[#$^*+?.()|[\]{}\\]/g, '\\$&')));
   });
 
-  it('audit events cannot be edited or deleted', async () => {
-    await assert.rejects(getPool().query('DELETE FROM audit_event'), /append-only/);
+  it('audit events are only ever inserted, by audit.js alone', async () => {
+    const sourceDir = new URL('../src/', import.meta.url);
+    const files = (await readdir(sourceDir, { recursive: true })).filter((file) => file.endsWith('.js'));
+    for (const file of files) {
+      const source = await readFile(new URL(file, sourceDir), 'utf8');
+      const touchesAudit = /auditEvents|audit_events/.test(source);
+      if (file === join('audit', 'audit.js')) {
+        assert.doesNotMatch(source, /\.(update|replace|delete|findOneAnd|bulkWrite|drop)\w*\(/, file);
+      } else if (touchesAudit) {
+        assert.ok(file === join('db', 'mongo.js') || file === join('db', 'setup.js'), `${file} must use recordAudit`);
+      }
+    }
+  });
+
+  it('the database rejects documents that break the schema', async () => {
+    const users = await collection('users');
+    await assert.rejects(
+      users.insertOne({ _id: crypto.randomUUID(), email: 'nopass@number160.local', displayName: 'No password',
+        status: 'ACTIVE', preferredLanguage: 'en', roles: [], createdAt: new Date(), updatedAt: new Date() }),
+      /Document failed validation/,
+    );
+    await assert.rejects(
+      users.insertOne({ _id: crypto.randomUUID(), email: 'staff@number160.local', displayName: 'Duplicate',
+        status: 'INVITED', preferredLanguage: 'en', roles: [], createdAt: new Date(), updatedAt: new Date() }),
+      /duplicate key/,
+    );
   });
 });
