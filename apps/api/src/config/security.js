@@ -1,0 +1,38 @@
+import { ROLES } from '#domain';
+
+// Plan §8: proposed values, pending Security sign-off. Change them here only.
+
+const MINUTE = 60_000;
+const HOUR = 60 * MINUTE;
+const DAY = 24 * HOUR;
+
+export const SESSION_COOKIE = 'cx_session';
+
+const HIGH_PRIVILEGE = new Set([ROLES.PLATFORM_ADMIN, ROLES.TENANT_ADMIN]);
+
+/**
+ * Sessions without a selected role use the stricter TTL.
+ * @param {string | null | undefined} role
+ */
+export function sessionTtl(role) {
+  return !role || HIGH_PRIVILEGE.has(role)
+    ? { idleMs: 2 * HOUR, absoluteMs: 24 * HOUR }
+    : { idleMs: 12 * HOUR, absoluteMs: 7 * DAY };
+}
+
+/** Sliding expiry is written at most this often per session. */
+export const SESSION_TOUCH_INTERVAL_MS = MINUTE;
+
+export const INVITATION_TTL_MS = 72 * HOUR;
+export const PASSWORD_RESET_TTL_MS = HOUR;
+
+export const RATE_LIMITS = Object.freeze({
+  loginAccount: { max: 5, windowMs: 15 * MINUTE },
+  loginIp: { max: 20, windowMs: 15 * MINUTE },
+  resetRequestEmail: { max: 3, windowMs: HOUR },
+  resetRequestIp: { max: 10, windowMs: HOUR },
+  tokenIp: { max: 10, windowMs: 15 * MINUTE },
+});
+
+/** scrypt cost: ~50 ms and 32 MiB per hash on a Vercel function. */
+export const SCRYPT = Object.freeze({ N: 2 ** 15, r: 8, p: 1, keyLength: 64, maxmem: 64 * 1024 * 1024 });

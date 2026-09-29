@@ -1,16 +1,33 @@
 {
-  "name": "connect-backend",
-  "version": "1.0.0",
-  "description": "Connect (Sapawoo x Number160) backend — Express + file NoSQL (data.json)",
-  "main": "server.js",
-  "engines": { "node": ">=18" },
+  "name": "connect",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.10.0",
+  "engines": {
+    "node": "22.x"
+  },
+  "imports": {
+    "#domain": "./packages/domain/src/index.js"
+  },
   "scripts": {
-    "start": "node server.js",
-    "dev": "node server.js",
-    "health": "node -e \"fetch('http://localhost:'+(process.env.PORT||3000)+'/api/health').then(r=>r.json()).then(j=>console.log(j)).catch(e=>{console.error(e.message);process.exit(1)})\""
+    "dev": "pnpm run --parallel \"/^dev:/\"",
+    "dev:api": "node --watch --env-file-if-exists=.env apps/api/server.js",
+    "dev:web": "vite apps/web",
+    "start": "node apps/api/server.js",
+    "build": "vite build apps/web",
+    "migrate": "node --env-file-if-exists=.env apps/api/src/db/migrate.js",
+    "seed": "node --env-file-if-exists=.env apps/api/src/db/seed-local.js",
+    "db:reset": "node --env-file-if-exists=.env apps/api/src/db/db-reset.js",
+    "user:create": "node --env-file-if-exists=.env apps/api/src/db/create-user.js",
+    "test": "node --env-file-if-exists=.env.test --test --test-concurrency=1 'packages/domain/test/**/*.test.js' 'apps/api/test/**/*.test.js'",
+    "test:permission": "node --env-file-if-exists=.env.test --test --test-concurrency=1 --test-name-pattern=@permission 'packages/domain/test/**/*.test.js' 'apps/api/test/**/*.test.js'",
+    "check:syntax": "git ls-files '*.js' '*.mjs' | xargs -n1 node --check"
   },
   "dependencies": {
-    "cors": "^2.8.5",
-    "express": "^4.19.2"
+    "bootstrap": "^5.3.3",
+    "pg": "^8.13.1"
+  },
+  "devDependencies": {
+    "vite": "^6.0.0"
   }
 }
