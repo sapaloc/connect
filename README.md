@@ -31,18 +31,31 @@ changes, bump `SCHEMA_VERSION` and keep old documents valid (add optional fields
 
 ## Backups
 
-Atlas Free has no backups, so Vercel Cron calls `GET /api/v1/internal/jobs/backup` every day at 02:00 Vietnam
-time (`vercel.json`, protected by `CRON_SECRET`). It exports every collection except sessions and rate limits as
-canonical Extended JSON (Decimal128, dates and binary kept exactly), gzipped, to the private Supabase Storage
-bucket `connect-files` under `backups/<APP_ENV>/`, and keeps the newest 30.
+Atlas Free has no backups, so the maintainer's Mac pulls a copy of UAT every day at 02:00 (launchd runs it on
+wake if the Mac was asleep). `scripts/backup-uat.sh` exports every collection except sessions and rate limits as
+canonical Extended JSON (Decimal128, dates and binary kept exactly), gzipped, into `~/Backups/connect-uat`
+(file mode 600) and keeps the newest 30.
+
+Backups contain password hashes and customer data: never commit them (the repo is public) or paste them in chat.
+
+One-time setup on the Mac:
 
 ```bash
-MONGODB_URI=<uat uri> APP_ENV=uat pnpm db:backup          # download a copy now into ./backups (gitignored)
-pnpm db:restore --file backups/<file>.json.gz --confirm local   # replace ALL data (local/test/uat only)
+mkdir -p ~/.config/connect && chmod 700 ~/.config/connect
+# ~/.config/connect/uat.env (chmod 600):
+#   APP_ENV=uat
+#   MONGODB_URI="<UAT Atlas URI, same value as the GitHub secret UAT_MONGODB_URI>"
+#   MONGODB_DB=connect
+launchctl load ~/Library/LaunchAgents/com.sapawoo.connect-backup.plist   # runs scripts/backup-uat.sh daily
 ```
 
-Download a daily file from Supabase → Storage → `connect-files` → `backups/uat`. Backups contain password
-hashes: keep them out of the repo and chat.
+Manual commands:
+
+```bash
+scripts/backup-uat.sh                                            # UAT copy now
+pnpm db:backup                                                   # local database into ./backups (gitignored)
+pnpm db:restore --file <file>.json.gz --confirm local            # replace ALL data (local/test/uat only)
+```
 
 ## Local development
 
@@ -96,5 +109,5 @@ pnpm test:permission      # only @permission tests
 `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`, `UAT_MONGODB_URI` (same value as `MONGODB_URI` on Vercel),
 `UAT_SEED_PASSWORD` (optional; test account password on UAT, must meet the password policy).
 
-Vercel env (Production): `MONGODB_URI` (from the Atlas integration), `MONGODB_DB=connect`, `SESSION_SECRET`, `CRON_SECRET`,
-`APP_ENV=uat`, `APP_ORIGIN`, `MICROSITE_PUBLIC_BASE_URL`, `STORAGE_*` (Supabase Storage for files).
+Vercel env (Production): `MONGODB_URI` (from the Atlas integration), `MONGODB_DB=connect`, `SESSION_SECRET`,
+`APP_ENV=uat`, `APP_ORIGIN`, `MICROSITE_PUBLIC_BASE_URL`.
