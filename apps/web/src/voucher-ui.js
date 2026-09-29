@@ -88,6 +88,26 @@ function fit(ctx, text, maxWidth) {
   return `${cut}…`;
 }
 
+/** Card colours from the `main` design tokens (--sw-card, --sw-ink, --sw-acc, --sw-ink2). */
+const CARD = '#FBF7EE';
+const INK = '#1F2823';
+const ACCENT = '#B8643F';
+const INK_SOFT = '#3D4A41';
+
+/**
+ * The SAPAWOO wordmark (Georgia, letter-spaced) at the foot of a share image.
+ * @param {CanvasRenderingContext2D} ctx
+ * @param {number} x
+ * @param {number} y
+ */
+function drawWordmark(ctx, x, y) {
+  ctx.fillStyle = INK_SOFT;
+  ctx.font = '30px Georgia, serif';
+  if ('letterSpacing' in ctx) ctx.letterSpacing = '2.4px';
+  ctx.fillText('SAPAWOO', x, y);
+  if ('letterSpacing' in ctx) ctx.letterSpacing = '0px';
+}
+
 /**
  * Top band of a share image in the merchant colour. With a logo, the logo (on a white chip) takes
  * the place of the small eyebrow line.
@@ -142,7 +162,7 @@ export async function voucherImage(voucher) {
   await document.fonts?.ready;
   const font = (/** @type {number} */ size, weight = 700) => `${weight} ${size}px "DM Sans", system-ui, sans-serif`;
 
-  ctx.fillStyle = '#F4EFE9';
+  ctx.fillStyle = CARD;
   ctx.fillRect(0, 0, W, H);
   await drawHeader(ctx, {
     width: W,
@@ -152,7 +172,7 @@ export async function voucherImage(voucher) {
     brand: voucher.brand,
   });
 
-  ctx.fillStyle = '#C2410C';
+  ctx.fillStyle = ACCENT;
   ctx.font = font(96);
   ctx.fillText(fit(ctx, discountText(voucher), W - 120), W / 2, 430);
 
@@ -161,14 +181,13 @@ export async function voucherImage(voucher) {
   ctx.fillRect(W / 2 - 310, 490, 620, 620);
   ctx.drawImage(qr, W / 2 - 280, 520, 560, 560);
 
-  ctx.fillStyle = '#17262D';
+  ctx.fillStyle = INK;
   ctx.font = font(72);
   ctx.fillText(formatVoucherCode(voucher.code), W / 2, 1200);
   ctx.font = font(32, 500);
-  ctx.fillStyle = '#4B5563';
+  ctx.fillStyle = INK_SOFT;
   ctx.fillText(fit(ctx, termsText(voucher), W - 120), W / 2, 1260);
-  ctx.font = font(26, 500);
-  ctx.fillText('MyConnect', W / 2, 1315);
+  drawWordmark(ctx, W / 2, 1318);
 
   return new Promise((resolve, reject) => canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error('toBlob failed'))), 'image/png'));
 }
@@ -192,7 +211,7 @@ export async function partnerQrImage(qr) {
   await document.fonts?.ready;
   const font = (/** @type {number} */ size, weight = 700) => `${weight} ${size}px "DM Sans", system-ui, sans-serif`;
 
-  ctx.fillStyle = '#F4EFE9';
+  ctx.fillStyle = CARD;
   ctx.fillRect(0, 0, W, H);
   await drawHeader(ctx, {
     width: W,
@@ -203,7 +222,7 @@ export async function partnerQrImage(qr) {
   });
 
   if (qr.discountRate) {
-    ctx.fillStyle = '#C2410C';
+    ctx.fillStyle = ACCENT;
     ctx.font = font(96);
     ctx.fillText(fit(ctx, t('percentOff', { value: ratePercent(qr.discountRate) }), W - 120), W / 2, 430);
   }
@@ -213,14 +232,13 @@ export async function partnerQrImage(qr) {
   ctx.fillRect(W / 2 - 310, 490, 620, 620);
   ctx.drawImage(image, W / 2 - 280, 520, 560, 560);
 
-  ctx.fillStyle = '#17262D';
+  ctx.fillStyle = INK;
   ctx.font = font(44);
   ctx.fillText(fit(ctx, t('scanToGetVoucher'), W - 120), W / 2, 1200);
   ctx.font = font(30, 500);
-  ctx.fillStyle = '#4B5563';
+  ctx.fillStyle = INK_SOFT;
   ctx.fillText(fit(ctx, t('referralTerms', { days: 7 }), W - 120), W / 2, 1260);
-  ctx.font = font(26, 500);
-  ctx.fillText('MyConnect', W / 2, 1315);
+  drawWordmark(ctx, W / 2, 1318);
 
   return new Promise((resolve, reject) => canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error('toBlob failed'))), 'image/png'));
 }

@@ -69,8 +69,8 @@ export function appLayout(app, current, { title, content }) {
       <a class="skip-link" href="#main">${esc(t('skipToContent'))}</a>
       <aside class="sb" id="sidebar" aria-label="${esc(t('menu'))}">
         <div class="sb-head">
-          <span class="brand brand-on-dark">MYCONNECT</span>
-          <span class="brand-mark" aria-hidden="true">M</span>
+          <span class="brand brand-on-dark">SAPAWOO</span>
+          <span class="brand-mark" aria-hidden="true">S</span>
           <button type="button" class="icon-btn sb-close" data-drawer="close" aria-label="${esc(t('closeMenu'))}">${icon('close')}</button>
         </div>
         <nav class="sb-nav">${sideNav}</nav>
