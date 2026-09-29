@@ -4,6 +4,7 @@ import { icon, navItem, visibleNav } from '../nav.js';
 import { getTheme } from '../theme.js';
 import { merchantsPanel, mountMerchants } from './merchants.js';
 import { mountTeam, teamPanel } from './team.js';
+import { mountVouchers, vouchersPanel } from './vouchers.js';
 
 /** @typedef {import('../main.js').App} App */
 /** @typedef {import('../nav.js').NavItem} NavItem */
@@ -180,6 +181,12 @@ export function teamView(app) {
 export function merchantsView(app) {
   render(app, '/console/merchants', merchantsPanel());
   mountMerchants(app);
+}
+
+/** @param {App} app */
+export function vouchersView(app) {
+  render(app, '/console/vouchers', vouchersPanel(app));
+  mountVouchers(app);
 }
 
 /** @param {App} app */

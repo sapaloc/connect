@@ -626,6 +626,171 @@ body {
   color: #2f6f58;
 }
 
+.kpi-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  width: 100%;
+  text-align: left;
+  color: var(--sw-ink);
+  cursor: pointer;
+}
+
+.kpi-btn:hover,
+.kpi-btn:focus-visible {
+  border-color: var(--sw-acc);
+}
+
+/* Voucher card: the customer-facing ticket, also drawn as PNG in voucher-ui.js. */
+.vcard {
+  max-width: 360px;
+  margin: 0 auto;
+  border-radius: 18px;
+  overflow: hidden;
+  background: #f4efe9;
+  border: 1px solid var(--sw-line);
+  color: #17262d;
+}
+
+.vcard-head {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 16px;
+  background: #28332c;
+  color: #fff;
+  text-align: center;
+}
+
+.vcard-eyebrow {
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  opacity: 0.8;
+}
+
+.vcard-merchant {
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.vcard-customer {
+  font-size: 13px;
+  color: #cfe3d6;
+}
+
+.vcard-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 16px;
+  text-align: center;
+}
+
+.vcard-discount {
+  margin: 0;
+  font-size: 28px;
+  font-weight: 700;
+  color: #c2410c;
+}
+
+.vcard-qr {
+  padding: 10px;
+  background: #fff;
+  border-radius: 12px;
+}
+
+.vcard-qr img {
+  display: block;
+  width: 200px;
+  height: 200px;
+}
+
+.vcard-code {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  font-variant-numeric: tabular-nums;
+}
+
+.vcard-terms,
+.vcard-note {
+  margin: 0;
+  font-size: 13px;
+  color: #4b5563;
+}
+
+.vcard-off .vcard-qr img {
+  opacity: 0.25;
+}
+
+.vcard-actions {
+  display: grid;
+  gap: 8px;
+  max-width: 360px;
+  margin: 16px auto 0;
+}
+
+.vdialog {
+  width: min(420px, calc(100vw - 24px));
+  max-height: calc(100dvh - 24px);
+  padding: 0;
+  border: 0;
+  border-radius: 18px;
+  background: var(--sw-card);
+  color: var(--sw-ink);
+  box-shadow: var(--sw-shadow);
+}
+
+.vdialog::backdrop {
+  background: rgb(0 0 0 / 45%);
+}
+
+.vdialog-inner {
+  position: relative;
+  padding: 44px 16px 16px;
+}
+
+.vdialog-close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+}
+
+.issued-one,
+.issued-batch {
+  margin-top: 16px;
+}
+
+.code-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.code-chip {
+  min-height: 44px;
+  padding: 6px 12px;
+  border: 1px solid var(--sw-line);
+  border-radius: 10px;
+  background: var(--sw-card);
+  color: var(--sw-ink);
+  font-family: var(--bs-font-monospace);
+  font-weight: 600;
+}
+
+.code-chip:hover {
+  border-color: var(--sw-acc);
+}
+
+.public-card {
+  max-width: 440px;
+}
+
 /* Tables become stacked cards on phones; cells carry their header in data-label. */
 @media (max-width: 767.98px) {
   .tbl-stack thead {

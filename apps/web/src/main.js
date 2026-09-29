@@ -6,7 +6,8 @@ import { canOpen, navItem } from './nav.js';
 import { applyTheme, toggleTheme } from './theme.js';
 import { forgotView, inviteView, loginView, resetView, selectRoleView } from './views/auth.js';
 import { showMessage } from './views/common.js';
-import { consoleView, counterView, merchantsView, myView, teamView } from './views/shell.js';
+import { consoleView, counterView, merchantsView, myView, teamView, vouchersView } from './views/shell.js';
+import { voucherPublicView } from './views/voucher-public.js';
 
 /**
  * @typedef {{
@@ -27,6 +28,7 @@ const PUBLIC_ROUTES = { '/login': loginView, '/forgot': forgotView, '/invite': i
 const PAGE_ROUTES = {
   '/console': consoleView,
   '/console/merchants': merchantsView,
+  '/console/vouchers': vouchersView,
   '/console/team': teamView,
   '/counter': counterView,
   '/my': myView,
@@ -64,6 +66,8 @@ function route() {
   const profile = app.state.profile;
   document.documentElement.lang = getLang();
 
+  const voucherPath = /^\/v\/([^/]+)$/.exec(path);
+  if (voucherPath) return voucherPublicView(app, decodeURIComponent(voucherPath[1]));
   if (PUBLIC_ROUTES[path]) {
     if (path === '/login' && profile?.activeRole) return app.navigate(/** @type {string} */ (profile.landing), { replace: true });
     PUBLIC_ROUTES[path](app);
