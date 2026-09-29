@@ -1,11 +1,12 @@
 import 'bootstrap/dist/css/bootstrap.min.css';
 import './styles.css';
-import { surfaceOf } from '#domain';
 import { api, fetchProfile, SESSION_ENDED } from './api.js';
 import { errorText, getLang, setLang, t } from './i18n.js';
+import { canOpen, navItem } from './nav.js';
+import { applyTheme, toggleTheme } from './theme.js';
 import { forgotView, inviteView, loginView, resetView, selectRoleView } from './views/auth.js';
 import { showMessage } from './views/common.js';
-import { consoleView, counterView, myView } from './views/shell.js';
+import { consoleView, counterView, myView, teamView } from './views/shell.js';
 
 /**
  * @typedef {{
@@ -21,8 +22,9 @@ import { consoleView, counterView, myView } from './views/shell.js';
 /** @type {Record<string, (app: App) => void>} */
 const PUBLIC_ROUTES = { '/login': loginView, '/forgot': forgotView, '/invite': inviteView, '/reset': resetView };
 
+/** Signed-in pages; who may open each one is declared in nav.js. */
 /** @type {Record<string, (app: App) => void>} */
-const SURFACE_ROUTES = { '/console': consoleView, '/counter': counterView, '/my': myView };
+const PAGE_ROUTES = { '/console': consoleView, '/console/team': teamView, '/counter': counterView, '/my': myView };
 
 /** @type {{ text: string, tone: 'error' | 'success' | 'info' } | null} */
 let pendingFlash = null;
@@ -65,12 +67,19 @@ function route() {
   if (path === '/select-role') return selectRoleView(app);
   if (!profile.activeRole) return app.navigate('/select-role', { replace: true });
 
-  const surface = surfaceOf(path);
-  const view = SURFACE_ROUTES[path];
-  if (!surface || !view || !profile.permissions.includes(`surface.${surface}`)) {
+  const item = navItem(path);
+  const view = PAGE_ROUTES[path];
+  if (!item || !view || !canOpen(profile, item)) {
     return app.navigate(/** @type {string} */ (profile.landing), { replace: true });
   }
   view(app);
+  document.title = `${t(item.label)} · Connect`;
+}
+
+/** @param {boolean} open */
+function setDrawer(open) {
+  document.getElementById('app-frame')?.classList.toggle('drawer-open', open);
+  document.querySelector('[data-drawer="open"]')?.setAttribute('aria-expanded', String(open));
 }
 
 async function signOut() {
@@ -100,6 +109,16 @@ async function loadHealth() {
 
 document.addEventListener('click', (event) => {
   const target = /** @type {HTMLElement} */ (event.target);
+  const drawer = target.closest('[data-drawer]');
+  if (drawer) {
+    setDrawer(drawer.getAttribute('data-drawer') === 'open');
+    return;
+  }
+  if (target.closest('[data-theme]')) {
+    toggleTheme();
+    route();
+    return;
+  }
   const link = /** @type {HTMLAnchorElement | null} */ (target.closest('a[data-nav]'));
   if (link && !event.metaKey && !event.ctrlKey) {
     event.preventDefault();
@@ -118,7 +137,13 @@ document.addEventListener('click', (event) => {
   }
 });
 
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') setDrawer(false);
+});
+
 window.addEventListener('popstate', route);
+
+applyTheme();
 
 window.addEventListener(SESSION_ENDED, () => {
   if (!app.state.profile) return;
