@@ -187,12 +187,12 @@ const STORAGE_KEY = 'connect.lang';
 /** @returns {'vi' | 'en'} */
 export function getLang() {
   const saved = localStorage.getItem(STORAGE_KEY);
-  return saved === 'en' || saved === 'vi' ? saved : 'vi';
+  return saved === 'en' || saved === 'vi' ? saved : 'en';
 }
 
 /** @param {string} lang */
 export function setLang(lang) {
-  localStorage.setItem(STORAGE_KEY, lang === 'en' ? 'en' : 'vi');
+  localStorage.setItem(STORAGE_KEY, lang === 'vi' ? 'vi' : 'en');
 }
 
 /**

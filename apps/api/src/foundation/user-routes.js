@@ -71,7 +71,7 @@ async function inviteUser(req, res, ctx) {
   const email = stringField(body, 'email', { max: 254 }).trim().toLowerCase();
   const displayName = stringField(body, 'displayName', { max: 120 }).trim();
   const role = stringField(body, 'role', { max: 32 });
-  const language = stringField(body, 'preferredLanguage', { max: 2, optional: true }) || 'vi';
+  const language = stringField(body, 'preferredLanguage', { max: 2, optional: true }) || 'en';
   const tenantId = targetTenant(session, body.tenantId);
 
   if (!EMAIL_PATTERN.test(email)) throw new HttpError(422, 'VALIDATION', 'email is invalid', { details: { field: 'email' } });

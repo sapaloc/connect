@@ -32,8 +32,8 @@ export function teamPanel(profile) {
         <div class="col-6 col-md-1">
           <label for="invite-lang" class="form-label small">${esc(t('language'))}</label>
           <select id="invite-lang" name="preferredLanguage" class="form-select">
-            <option value="vi"${getLang() === 'vi' ? ' selected' : ''}>VI</option>
             <option value="en"${getLang() === 'en' ? ' selected' : ''}>EN</option>
+            <option value="vi"${getLang() === 'vi' ? ' selected' : ''}>VI</option>
           </select>
         </div>
         <div class="col-12 col-md-2 d-grid">
