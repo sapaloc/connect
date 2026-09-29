@@ -10,7 +10,7 @@ import { parseCookies, serializeCookie } from '../http/cookies.js';
 import { HttpError } from '../http/errors.js';
 import { clientIp } from '../http/request.js';
 import { sendJson } from '../http/respond.js';
-import { UUID_PATTERN } from '../merchants/scope.js';
+import { brandView, UUID_PATTERN } from '../merchants/scope.js';
 import { newCodes, publicView } from '../vouchers/voucher-routes.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -46,9 +46,9 @@ async function resolve(token, tx) {
   const commercialRules = await collection('commercialRules');
   const rule = partner ? await commercialRules.findOne({ partnerId: partner._id, status: 'ACTIVE' }, options) : null;
   const tenants = await collection('tenants');
-  const tenant = await tenants.findOne({ _id: medium.tenantId, status: 'ACTIVE' }, { ...options, projection: { name: 1 } });
+  const tenant = await tenants.findOne({ _id: medium.tenantId, status: 'ACTIVE' }, { ...options, projection: { name: 1, logoAssetId: 1, brandColor: 1 } });
   if (partner?.status !== 'ACTIVE' || !rule || !tenant) return { result: 'PARTNER_INACTIVE', medium, partner };
-  return { result: 'VALID', medium, partner, rule, merchantName: /** @type {string} */ (tenant.name) };
+  return { result: 'VALID', medium, partner, rule, merchantName: /** @type {string} */ (tenant.name), brand: brandView(tenant) };
 }
 
 /** @param {string} result */
@@ -61,10 +61,12 @@ function refusal(result) {
  * @param {any} partner
  * @param {any} rule
  * @param {string} merchantName
+ * @param {any} brand
  */
-function referralView(partner, rule, merchantName) {
+function referralView(partner, rule, merchantName, brand) {
   return {
     merchantName,
+    brand,
     partnerName: partner.name,
     partnerType: partner.partnerType,
     discountRate: fromDecimal128(rule.customerDiscountRate),
@@ -115,8 +117,8 @@ async function openReferral(req, res, ctx) {
     res,
     200,
     {
-      referral: referralView(found.partner, found.rule, found.merchantName),
-      voucher: voucher ? publicView(voucher, found.merchantName, now) : null,
+      referral: referralView(found.partner, found.rule, found.merchantName, found.brand),
+      voucher: voucher ? publicView(voucher, found.merchantName, now, found.brand) : null,
     },
     browser.header,
   );
@@ -143,7 +145,7 @@ async function activateReferral(req, res, ctx) {
         await referralMedia.updateOne({ _id: medium._id }, { $set: { lastActivationAt: now } }, { session: tx });
 
         const existing = await activeVoucherOf(medium._id, browser.id, now, tx);
-        if (existing) return { voucher: existing, merchantName: found.merchantName, created: false };
+        if (existing) return { voucher: existing, merchantName: found.merchantName, brand: found.brand, created: false };
 
         const visits = await collection('referralVisits');
         const visit = await visits.findOne(
@@ -199,12 +201,12 @@ async function activateReferral(req, res, ctx) {
           },
           { session: tx },
         );
-        return { voucher, merchantName: found.merchantName, created: true };
+        return { voucher, merchantName: found.merchantName, brand: found.brand, created: true };
       });
       sendJson(
         res,
         outcome.created ? 201 : 200,
-        { voucher: publicView(outcome.voucher, outcome.merchantName, new Date()), created: outcome.created },
+        { voucher: publicView(outcome.voucher, outcome.merchantName, new Date(), outcome.brand), created: outcome.created },
         browser.header,
       );
       return;

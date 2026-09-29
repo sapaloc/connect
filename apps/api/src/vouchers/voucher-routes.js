@@ -23,7 +23,7 @@ import { withTransaction } from '../db/tx.js';
 import { HttpError } from '../http/errors.js';
 import { clientIp, readJson, stringField } from '../http/request.js';
 import { sendJson } from '../http/respond.js';
-import { merchantNames, scopeFilter, UUID_PATTERN } from '../merchants/scope.js';
+import { merchantBrands, merchantNames, scopeFilter, UUID_PATTERN } from '../merchants/scope.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const VN_OFFSET_MS = 7 * 60 * 60 * 1000;
@@ -121,12 +121,14 @@ function escapeRegex(value) {
  * @param {any} voucher
  * @param {Date} now
  * @param {Map<string, string>} [merchantNames]
+ * @param {Map<string, any>} [brands] for the voucher card and share image in the console
  */
-function voucherView(voucher, now, merchantNames) {
+function voucherView(voucher, now, merchantNames, brands) {
   return {
     code: voucher.code,
     merchantId: voucher.tenantId,
     merchantName: merchantNames?.get(voucher.tenantId) ?? null,
+    brand: brands?.get(voucher.tenantId) ?? null,
     source: voucher.source,
     status: effectiveVoucherStatus(voucher.status, voucher.validUntil, now),
     discountType: voucher.discountType,
@@ -154,11 +156,13 @@ function voucherView(voucher, now, merchantNames) {
  * @param {any} voucher
  * @param {string} merchantName
  * @param {Date} now
+ * @param {any} [brand] merchant logo and colour
  */
-export function publicView(voucher, merchantName, now) {
+export function publicView(voucher, merchantName, now, brand = null) {
   return {
     code: voucher.code,
     merchantName,
+    brand,
     status: effectiveVoucherStatus(voucher.status, voucher.validUntil, now),
     discountType: voucher.discountType,
     discountValue: fromDecimal128(voucher.discountValue),
@@ -248,7 +252,8 @@ async function issueVouchers(req, res, ctx) {
         );
       });
       const names = await merchantNames([tenantId]);
-      sendJson(res, 201, { batchId, vouchers: docs.map((doc) => voucherView(doc, now, names)) });
+      const brands = await merchantBrands([tenantId]);
+      sendJson(res, 201, { batchId, vouchers: docs.map((doc) => voucherView(doc, now, names, brands)) });
       return;
     } catch (error) {
       if (/** @type {any} */ (error)?.code !== 11000 || attempt >= 3) throw error;
@@ -302,7 +307,8 @@ async function listVouchers(req, res, ctx) {
   const counts = Object.fromEntries(STATUS_FILTERS.map((key) => [key, 0]));
   for (const row of countRows) counts[row._id] = row.n;
   const names = await merchantNames(rows.map((row) => row.tenantId));
-  sendJson(res, 200, { vouchers: rows.map((row) => voucherView(row, now, names)), counts, limit: LIST_LIMIT });
+  const brands = await merchantBrands(rows.map((row) => row.tenantId));
+  sendJson(res, 200, { vouchers: rows.map((row) => voucherView(row, now, names, brands)), counts, limit: LIST_LIMIT });
 }
 
 /** @type {import('../http/router.js').Handler} */
@@ -350,7 +356,8 @@ async function publicVoucher(req, res, ctx) {
   if (!voucher || !names.has(voucher.tenantId)) throw new HttpError(404, 'VOUCHER_NOT_FOUND', 'Voucher not found');
   const session = await loadSession(req);
   const canRedeem = Boolean(session && can(session.role, 'redemption.create') && session.tenantId === voucher.tenantId);
-  sendJson(res, 200, { voucher: publicView(voucher, /** @type {string} */ (names.get(voucher.tenantId)), new Date()), canRedeem });
+  const brand = (await merchantBrands([voucher.tenantId])).get(voucher.tenantId);
+  sendJson(res, 200, { voucher: publicView(voucher, /** @type {string} */ (names.get(voucher.tenantId)), new Date(), brand), canRedeem });
 }
 
 /**

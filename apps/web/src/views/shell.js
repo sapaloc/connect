@@ -2,6 +2,7 @@ import { esc } from '../dom.js';
 import { getLang, t } from '../i18n.js';
 import { icon, navItem, visibleNav } from '../nav.js';
 import { getTheme } from '../theme.js';
+import { brandPanel, mountBrand } from './brand.js';
 import { counterPanel, mountCounter } from './counter.js';
 import { merchantsPanel, mountMerchants } from './merchants.js';
 import { mountMy, myPanel } from './my.js';
@@ -196,6 +197,12 @@ export function vouchersView(app) {
 export function partnersView(app) {
   render(app, '/console/partners', partnersPanel(app));
   mountPartners(app);
+}
+
+/** @param {App} app */
+export function brandView(app) {
+  render(app, '/console/brand', brandPanel());
+  mountBrand(app);
 }
 
 /** @param {App} app */

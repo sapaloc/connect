@@ -9,7 +9,7 @@ import { closeClient, COLLECTIONS, getDb } from './mongo.js';
  * Bump when a validator or index changes. Changes must keep old documents valid
  * (add optional fields; backfill in a script before making a field required).
  */
-export const SCHEMA_VERSION = 6;
+export const SCHEMA_VERSION = 7;
 
 const DAY_SECONDS = 24 * 60 * 60;
 const uuid = { bsonType: 'string', pattern: '^[0-9a-f-]{36}$' };
@@ -92,7 +92,7 @@ const DEFINITIONS = {
         createdAt: date,
       },
     },
-    // slug, contactEmail, contactPhone, address, vatRate are optional and not in the validator: changing
+    // slug, contactEmail, contactPhone, address, vatRate, brandColor, logoAssetId are optional and not in the validator: changing
     // an existing validator needs collMod, which the UAT database user may not run.
     indexes: [
       { key: { name: 1 }, name: 'name_uq', unique: true },
@@ -404,6 +404,39 @@ const DEFINITIONS = {
       { key: { redemptionId: 1, obligationType: 1 }, name: 'redemption_obligation_uq', unique: true },
       { key: { tenantId: 1, partnerId: 1, status: 1 }, name: 'tenant_partner_status' },
       { key: { partnerId: 1, redeemedAt: -1 }, name: 'partner_redeemed' },
+    ],
+  },
+
+  // Uploaded images, stored as WebP inside MongoDB (plan §21.3). Replaced images are kept, not deleted.
+  [COLLECTIONS.fileAssets]: {
+    schema: {
+      bsonType: 'object',
+      required: ['_id', 'assetType', 'data', 'mimeType', 'width', 'height', 'byteSize', 'checksumSha256', 'status', 'createdAt'],
+      properties: {
+        _id: uuid,
+        tenantId: nullableUuid,
+        assetType: { enum: ['BRAND_LOGO', 'PARTNER_LOGO', 'MICROSITE_IMAGE', 'VOUCHER_IMAGE', 'VIETQR_IMAGE', 'PAYMENT_RECEIPT'] },
+        data: { bsonType: 'binData' },
+        mimeType: { enum: ['image/webp'] },
+        width: { bsonType: 'int', minimum: 1 },
+        height: { bsonType: 'int', minimum: 1 },
+        byteSize: { bsonType: 'int', minimum: 1, maximum: 1048576 },
+        originalByteSize: { bsonType: ['int', 'null'] },
+        checksumSha256: { bsonType: 'string', pattern: '^[0-9a-f]{64}$' },
+        status: { enum: ['ACTIVE', 'REPLACED', 'RESTRICTED'] },
+        createdBy: nullableUuid,
+        createdAt: date,
+        replacedAt: nullableDate,
+      },
+    },
+    indexes: [
+      {
+        key: { tenantId: 1, assetType: 1 },
+        name: 'tenant_logo_active_uq',
+        unique: true,
+        partialFilterExpression: { assetType: 'BRAND_LOGO', status: 'ACTIVE' },
+      },
+      { key: { tenantId: 1, assetType: 1, status: 1 }, name: 'tenant_type_status' },
     ],
   },
 

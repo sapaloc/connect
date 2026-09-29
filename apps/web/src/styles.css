@@ -716,8 +716,8 @@ a.brand:hover {
   align-items: center;
   gap: 2px;
   padding: 16px;
-  background: #28332c;
-  color: #fff;
+  background: var(--vcard-bg, #28332c);
+  color: var(--vcard-fg, #fff);
   text-align: center;
 }
 
@@ -735,7 +735,22 @@ a.brand:hover {
 
 .vcard-customer {
   font-size: 13px;
-  color: #cfe3d6;
+  opacity: 0.85;
+}
+
+.vcard-logo {
+  display: inline-flex;
+  margin-bottom: 8px;
+  padding: 6px 10px;
+  background: #fff;
+  border-radius: 10px;
+}
+
+.vcard-logo img {
+  display: block;
+  max-width: 160px;
+  max-height: 48px;
+  object-fit: contain;
 }
 
 .vcard-body {
@@ -1260,4 +1275,17 @@ a.brand:hover {
   align-items: center;
   gap: 10px;
   font-variant-numeric: tabular-nums;
+}
+
+.brand-preview {
+  max-width: 360px;
+  margin: 0 auto;
+}
+
+.merchant-logo {
+  display: block;
+  max-width: 96px;
+  max-height: 32px;
+  margin-bottom: 4px;
+  object-fit: contain;
 }

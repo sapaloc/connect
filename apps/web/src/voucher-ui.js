@@ -17,7 +17,9 @@ import { formatDate, formatVnd, t } from './i18n.js';
  *   createdAt?: string,
  *   redemption?: { grossAmount: string, discountAmount: string, payableAmount: string, redeemedAt: string } | null,
  *   voidReason?: string | null,
+ *   brand?: Brand | null,
  * }} Voucher
+ * @typedef {{ logoUrl: string | null, color: string | null, textColor: string | null }} Brand
  */
 
 /** @param {string} code */
@@ -87,6 +89,45 @@ function fit(ctx, text, maxWidth) {
 }
 
 /**
+ * Top band of a share image in the merchant colour. With a logo, the logo (on a white chip) takes
+ * the place of the small eyebrow line.
+ * @param {CanvasRenderingContext2D} ctx
+ * @param {{ width: number, eyebrow: string, merchantName: string, sub: string, brand?: Brand | null }} options
+ */
+async function drawHeader(ctx, { width: W, eyebrow, merchantName, sub, brand }) {
+  const font = (/** @type {number} */ size, weight = 700) => `${weight} ${size}px "DM Sans", system-ui, sans-serif`;
+  const ink = brand?.textColor ?? '#FFFFFF';
+  ctx.fillStyle = brand?.color ?? '#28332C';
+  ctx.fillRect(0, 0, W, 300);
+  ctx.textAlign = 'center';
+
+  const logo = brand?.logoUrl ? /** @type {HTMLImageElement | null} */ (await loadImage(brand.logoUrl).catch(() => null)) : null;
+  if (logo) {
+    const scale = Math.min(320 / logo.naturalWidth, 80 / logo.naturalHeight);
+    const w = logo.naturalWidth * scale;
+    const h = logo.naturalHeight * scale;
+    ctx.fillStyle = '#FFFFFF';
+    ctx.beginPath();
+    ctx.roundRect(W / 2 - w / 2 - 20, 28, w + 40, h + 24, 16);
+    ctx.fill();
+    ctx.drawImage(logo, W / 2 - w / 2, 40, w, h);
+  } else {
+    ctx.fillStyle = ink;
+    ctx.font = font(34, 500);
+    ctx.fillText(eyebrow.toUpperCase(), W / 2, 90);
+  }
+  ctx.fillStyle = ink;
+  ctx.font = font(64);
+  ctx.fillText(fit(ctx, merchantName, W - 120), W / 2, 190);
+  if (sub) {
+    ctx.globalAlpha = 0.85;
+    ctx.font = font(30, 500);
+    ctx.fillText(fit(ctx, sub, W - 120), W / 2, 250);
+    ctx.globalAlpha = 1;
+  }
+}
+
+/**
  * A 1080x1350 PNG to save or send by Zalo / WhatsApp: merchant, discount, QR, code, terms.
  * @param {Voucher} voucher
  * @returns {Promise<Blob>}
@@ -103,18 +144,13 @@ export async function voucherImage(voucher) {
 
   ctx.fillStyle = '#F4EFE9';
   ctx.fillRect(0, 0, W, H);
-  ctx.fillStyle = '#28332C';
-  ctx.fillRect(0, 0, W, 300);
-
-  ctx.textAlign = 'center';
-  ctx.fillStyle = '#FFFFFF';
-  ctx.font = font(34, 500);
-  ctx.fillText(t('voucherTitle').toUpperCase(), W / 2, 90);
-  ctx.font = font(64);
-  ctx.fillText(fit(ctx, voucher.merchantName ?? 'MyConnect', W - 120), W / 2, 180);
-  ctx.font = font(30, 500);
-  ctx.fillStyle = '#CFE3D6';
-  ctx.fillText(fit(ctx, voucher.customerName ?? '', W - 120), W / 2, 245);
+  await drawHeader(ctx, {
+    width: W,
+    eyebrow: t('voucherTitle'),
+    merchantName: voucher.merchantName ?? 'MyConnect',
+    sub: voucher.customerName ?? '',
+    brand: voucher.brand,
+  });
 
   ctx.fillStyle = '#C2410C';
   ctx.font = font(96);
@@ -138,7 +174,7 @@ export async function voucherImage(voucher) {
 }
 
 /**
- * @typedef {{ token: string, merchantName: string, partnerName: string, discountRate: string | null }} PartnerQr
+ * @typedef {{ token: string, merchantName: string, partnerName: string, discountRate: string | null, brand?: Brand | null }} PartnerQr
  */
 
 /**
@@ -158,18 +194,13 @@ export async function partnerQrImage(qr) {
 
   ctx.fillStyle = '#F4EFE9';
   ctx.fillRect(0, 0, W, H);
-  ctx.fillStyle = '#28332C';
-  ctx.fillRect(0, 0, W, 300);
-
-  ctx.textAlign = 'center';
-  ctx.fillStyle = '#FFFFFF';
-  ctx.font = font(34, 500);
-  ctx.fillText(t('referralOffer').toUpperCase(), W / 2, 90);
-  ctx.font = font(64);
-  ctx.fillText(fit(ctx, qr.merchantName, W - 120), W / 2, 180);
-  ctx.font = font(30, 500);
-  ctx.fillStyle = '#CFE3D6';
-  ctx.fillText(fit(ctx, t('introducedBy', { name: qr.partnerName }), W - 120), W / 2, 245);
+  await drawHeader(ctx, {
+    width: W,
+    eyebrow: t('referralOffer'),
+    merchantName: qr.merchantName,
+    sub: t('introducedBy', { name: qr.partnerName }),
+    brand: qr.brand,
+  });
 
   if (qr.discountRate) {
     ctx.fillStyle = '#C2410C';

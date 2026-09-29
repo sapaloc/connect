@@ -15,6 +15,7 @@ export const COLLECTIONS = Object.freeze({
   referralMedia: 'referral_media',
   referralVisits: 'referral_visits',
   commissionItems: 'commission_items',
+  fileAssets: 'file_assets',
   schemaVersions: 'schema_versions',
 });
 

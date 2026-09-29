@@ -2,6 +2,7 @@ import { parseReferralToken, ratePercent } from '#domain';
 import { api } from '../api.js';
 import { esc } from '../dom.js';
 import { errorText, t } from '../i18n.js';
+import { cardHead } from './voucher-card.js';
 import { publicLayout } from './voucher-public.js';
 
 /** @typedef {import('../main.js').App} App */
@@ -31,11 +32,12 @@ export async function referralPublicView(app, rawToken) {
     page.className = '';
     page.innerHTML = `
       <article class="vcard">
-        <header class="vcard-head">
-          <span class="vcard-eyebrow">${esc(t('referralOffer'))}</span>
-          <span class="vcard-merchant" translate="no">${esc(referral.merchantName)}</span>
-          <span class="vcard-customer">${esc(t('introducedBy', { name: referral.partnerName }))}</span>
-        </header>
+        ${cardHead({
+          eyebrow: t('referralOffer'),
+          merchantName: referral.merchantName,
+          sub: t('introducedBy', { name: referral.partnerName }),
+          brand: referral.brand,
+        })}
         <div class="vcard-body">
           <p class="vcard-discount">${esc(t('percentOff', { value: ratePercent(referral.discountRate) }))}</p>
           <p class="vcard-terms">${esc(t('referralTerms', { days: referral.validityDays }))}</p>

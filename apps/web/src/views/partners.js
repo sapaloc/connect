@@ -17,6 +17,7 @@ import { messageSlot, showLink, showMessage } from './common.js';
  *     companyCommissionRate: string | null, individualCommissionRate: string | null },
  *   accounts: { id: string, email: string, displayName: string, status: string, role: string }[],
  *   qr: null | { token: string, createdAt: string },
+ *   brand?: import('../voucher-ui.js').Brand | null,
  *   stats?: { opens: number, activations: number, redemptions: number, commissionOpen?: string },
  * }} Partner
  */
@@ -270,6 +271,7 @@ function qrOf(partner) {
     merchantName: partner.merchantName ?? 'MyConnect',
     partnerName: partner.name,
     discountRate: partner.rule?.customerDiscountRate ?? null,
+    brand: partner.brand ?? null,
   };
 }
 

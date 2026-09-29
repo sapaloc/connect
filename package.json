@@ -31,7 +31,8 @@
     "decimal.js": "^10.6.0",
     "jsqr": "^1.4.0",
     "mongodb": "^7.6.0",
-    "qrcode": "^1.5.4"
+    "qrcode": "^1.5.4",
+    "sharp": "^0.35.5"
   },
   "devDependencies": {
     "vite": "^6.0.0"
