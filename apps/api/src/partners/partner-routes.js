@@ -10,7 +10,7 @@ import { inviteMember, parsePerson } from '../foundation/user-routes.js';
 import { HttpError } from '../http/errors.js';
 import { readJson, stringField } from '../http/request.js';
 import { sendJson } from '../http/respond.js';
-import { merchantNames, scopeFilter, UUID_PATTERN } from '../merchants/scope.js';
+import { merchantBrands, merchantNames, scopeFilter, UUID_PATTERN } from '../merchants/scope.js';
 import { partnerStats } from './stats.js';
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -53,14 +53,15 @@ function ruleView(rule) {
 
 /**
  * @param {any} partner
- * @param {{ rules: Map<string, any>, accounts: Map<string, any[]>, names: Map<string, string>, media: Map<string, any> }} related
+ * @param {{ rules: Map<string, any>, accounts: Map<string, any[]>, names: Map<string, string>, media: Map<string, any>, brands: Map<string, any> }} related
  */
-function partnerView(partner, { rules, accounts, names, media }) {
+function partnerView(partner, { rules, accounts, names, media, brands }) {
   const medium = partner.status === 'ENDED' ? null : media.get(partner._id);
   return {
     id: partner._id,
     merchantId: partner.tenantId,
     merchantName: names.get(partner.tenantId) ?? null,
+    brand: brands.get(partner.tenantId) ?? null,
     name: partner.name,
     relationshipKind: partner.relationshipKind,
     partnerType: partner.partnerType,
@@ -109,7 +110,8 @@ async function related(partners) {
     }
   }
   const names = await merchantNames(partners.map((partner) => partner.tenantId));
-  return { rules, accounts, names, media };
+  const brands = await merchantBrands(partners.map((partner) => partner.tenantId));
+  return { rules, accounts, names, media, brands };
 }
 
 /**

@@ -65,6 +65,7 @@ describe('partner QR', () => {
     assert.equal(res.status, 200);
     assert.deepEqual(res.body.referral, {
       merchantName: 'Number160',
+      brand: null,
       partnerName: HOTEL.name,
       partnerType: 'HOTEL',
       discountRate: '0.0700',

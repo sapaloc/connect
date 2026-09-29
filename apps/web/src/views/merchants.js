@@ -1,6 +1,7 @@
 import { api } from '../api.js';
 import { $, busy, esc, formValues } from '../dom.js';
 import { errorText, formatDateTime, getLang, t } from '../i18n.js';
+import { prepareLogo } from '../image.js';
 import { messageSlot, showLink, showMessage } from './common.js';
 
 /** @typedef {import('../main.js').App} App */
@@ -8,7 +9,7 @@ import { messageSlot, showLink, showMessage } from './common.js';
  * @typedef {{
  *   id: string, name: string, slug: string | null, status: 'ACTIVE' | 'PAUSED',
  *   contactEmail: string | null, contactPhone: string | null, address: string | null,
- *   createdAt: string, admins: number, members: number,
+ *   createdAt: string, admins: number, members: number, brand: import('../voucher-ui.js').Brand | null,
  * }} Merchant
  */
 
@@ -143,7 +144,8 @@ export function mountMerchants(_app) {
           .map(
             (m) => `
         <tr>
-          <td>
+          <td class="merchant-cell">
+            ${m.brand?.logoUrl ? `<img class="merchant-logo" src="${esc(m.brand.logoUrl)}" alt="" />` : ''}
             <span class="d-block fw-semibold">${esc(m.name)}</span>
             <span class="d-block small text-muted text-break">${esc([m.contactPhone, m.contactEmail].filter(Boolean).join(' · ') || m.slug)}</span>
           </td>
@@ -153,6 +155,7 @@ export function mountMerchants(_app) {
           <td class="text-md-end">
             <div class="d-flex flex-wrap gap-2 justify-content-md-end">
               ${m.status === 'ACTIVE' ? `<button type="button" class="btn btn-sm btn-outline-secondary" data-invite="${esc(m.id)}">${esc(t('inviteAdmin'))}</button>` : ''}
+              <button type="button" class="btn btn-sm btn-outline-secondary" data-logo="${esc(m.id)}">${esc(t(m.brand?.logoUrl ? 'brandReplaceLogo' : 'brandPickLogo'))}</button>
               <button type="button" class="btn btn-sm btn-outline-secondary" data-status="${m.status === 'ACTIVE' ? 'PAUSED' : 'ACTIVE'}" data-id="${esc(m.id)}">
                 ${esc(t(m.status === 'ACTIVE' ? 'pause' : 'resume'))}
               </button>
@@ -226,9 +229,33 @@ export function mountMerchants(_app) {
     });
   });
 
+  const logoInput = document.createElement('input');
+  logoInput.type = 'file';
+  logoInput.accept = 'image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif';
+  let logoFor = '';
+  logoInput.addEventListener('change', async () => {
+    const picked = logoInput.files?.[0];
+    logoInput.value = '';
+    const merchant = merchants.find((m) => m.id === logoFor);
+    if (!picked || !merchant) return;
+    try {
+      await api('POST', `/api/v1/merchants/${encodeURIComponent(merchant.id)}/logo`, await prepareLogo(picked));
+      showMessage(t('brandLogoSavedFor', { name: merchant.name }), 'success', 'merchant-message');
+      await load();
+    } catch (error) {
+      showMessage(errorText(error), 'error', 'merchant-message');
+    }
+  });
+
   $('#merchant-rows').addEventListener('click', async (event) => {
     const target = /** @type {HTMLElement} */ (event.target).closest('button');
     if (!target) return;
+    const logoId = target.getAttribute('data-logo');
+    if (logoId) {
+      logoFor = logoId;
+      logoInput.click();
+      return;
+    }
     const inviteId = target.getAttribute('data-invite');
     if (inviteId) {
       /** @type {HTMLSelectElement} */ ($('#i-merchant')).value = inviteId;

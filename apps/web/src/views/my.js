@@ -33,7 +33,7 @@ export async function mountMy(_app) {
     const data = await api('GET', '/api/v1/my/partner');
     const { partner, rule, qr, stats, recent } = data;
     const share = qr
-      ? { token: qr.token, merchantName: partner.merchantName ?? 'MyConnect', partnerName: partner.name, discountRate: rule?.customerDiscountRate ?? null }
+      ? { token: qr.token, merchantName: partner.merchantName ?? 'MyConnect', partnerName: partner.name, discountRate: rule?.customerDiscountRate ?? null, brand: partner.brand }
       : null;
 
     page.innerHTML = `

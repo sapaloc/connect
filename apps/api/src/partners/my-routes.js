@@ -2,6 +2,7 @@ import { authed } from '../auth/guard.js';
 import { fromDecimal128 } from '../db/decimal.js';
 import { collection } from '../db/mongo.js';
 import { HttpError } from '../http/errors.js';
+import { brandView } from '../merchants/scope.js';
 import { sendJson } from '../http/respond.js';
 import { MERCHANT_PAYS, partnerStats } from './stats.js';
 
@@ -20,7 +21,7 @@ async function myPartner(_req, res, ctx) {
   if (!partner) throw new HttpError(404, 'PARTNER_NOT_FOUND', 'Partner not found');
 
   const tenants = await collection('tenants');
-  const tenant = await tenants.findOne({ _id: partner.tenantId }, { projection: { name: 1 } });
+  const tenant = await tenants.findOne({ _id: partner.tenantId }, { projection: { name: 1, logoAssetId: 1, brandColor: 1 } });
   const commercialRules = await collection('commercialRules');
   const rule = await commercialRules.findOne({ partnerId: partner._id, status: 'ACTIVE' });
   const referralMedia = await collection('referralMedia');
@@ -36,6 +37,7 @@ async function myPartner(_req, res, ctx) {
     partner: {
       name: partner.name,
       merchantName: tenant?.name ?? null,
+      brand: brandView(tenant),
       partnerType: partner.partnerType,
       relationshipKind: partner.relationshipKind,
       status: partner.status,

@@ -8,7 +8,7 @@ import { stopScanner } from './scanner.js';
 import { forgotView, inviteView, loginView, resetView, selectRoleView } from './views/auth.js';
 import { homeView } from './views/home.js';
 import { showMessage, togglePasswordReveal } from './views/common.js';
-import { consoleView, counterView, merchantsView, myView, partnersView, teamView, vouchersView } from './views/shell.js';
+import { brandView, consoleView, counterView, merchantsView, myView, partnersView, teamView, vouchersView } from './views/shell.js';
 import { referralPublicView } from './views/referral-public.js';
 import { voucherPublicView } from './views/voucher-public.js';
 
@@ -33,6 +33,7 @@ const PAGE_ROUTES = {
   '/console/merchants': merchantsView,
   '/console/vouchers': vouchersView,
   '/console/partners': partnersView,
+  '/console/brand': brandView,
   '/console/team': teamView,
   '/counter': counterView,
   '/my': myView,

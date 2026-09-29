@@ -5,3 +5,4 @@ export * from './money.js';
 export * from './merchant.js';
 export * from './partner.js';
 export * from './voucher.js';
+export * from './brand.js';

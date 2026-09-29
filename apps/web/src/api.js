@@ -31,9 +31,9 @@ export async function api(method, path, body) {
       credentials: 'same-origin',
       headers: {
         Accept: 'application/json',
-        ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
+        ...(body === undefined ? {} : { 'Content-Type': body instanceof Blob ? 'application/octet-stream' : 'application/json' }),
       },
-      body: body === undefined ? undefined : JSON.stringify(body),
+      body: body === undefined || body instanceof Blob ? body : JSON.stringify(body),
     });
   } catch {
     throw new ApiError(0, 'NETWORK', 'Network error');
