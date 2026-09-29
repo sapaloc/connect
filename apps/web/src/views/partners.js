@@ -1,7 +1,7 @@
 import { commercialRuleFromPercents, PARTNER_TYPES, ratePercent } from '#domain';
 import { api } from '../api.js';
 import { $, busy, esc, formValues } from '../dom.js';
-import { errorText, formatDateTime, getLang, t } from '../i18n.js';
+import { errorText, formatDateTime, formatVnd, getLang, t } from '../i18n.js';
 import { downloadBlob, partnerQrImage, referralLink, referralQrDataUrl, sharePartnerQr } from '../voucher-ui.js';
 import { icon } from '../nav.js';
 import { messageSlot, showLink, showMessage } from './common.js';
@@ -17,6 +17,7 @@ import { messageSlot, showLink, showMessage } from './common.js';
  *     companyCommissionRate: string | null, individualCommissionRate: string | null },
  *   accounts: { id: string, email: string, displayName: string, status: string, role: string }[],
  *   qr: null | { token: string, createdAt: string },
+ *   stats?: { opens: number, activations: number, redemptions: number, commissionOpen?: string },
  * }} Partner
  */
 
@@ -347,6 +348,16 @@ function qrDialog(partner, { manage, onReplaced }) {
   dialog.showModal();
 }
 
+/** @param {NonNullable<Partner['stats']>} stats */
+function partnerStatsLine(stats) {
+  const counts = t('partnerCounts', { opens: stats.opens, activations: stats.activations, redemptions: stats.redemptions });
+  return `
+    <p class="small mb-1 partner-stats">
+      <span class="text-muted">${esc(counts)}</span>
+      ${stats.commissionOpen !== undefined ? `<span class="d-block">${esc(t('commissionOwed'))}: <strong>${esc(formatVnd(stats.commissionOpen))}</strong></span>` : ''}
+    </p>`;
+}
+
 /**
  * @param {Partner} p
  * @param {{ manage: boolean, showMerchant: boolean }} options
@@ -391,6 +402,7 @@ function partnerCard(p, { manage, showMerchant }) {
         <span class="pill pill-${esc(p.status.toLowerCase())}">${esc(t(`status_${p.status}`))}</span>
       </header>
       ${rule ? `<p class="small mb-1">${rule}</p>` : ''}
+      ${p.stats ? partnerStatsLine(p.stats) : ''}
       ${contact ? `<p class="small text-muted mb-1">${esc(contact)}</p>` : ''}
       ${p.endReason ? `<p class="small text-muted mb-1">${esc(t('endPartner'))}: ${esc(p.endReason)}</p>` : ''}
       <div class="small partner-accounts"><span class="text-muted d-block">${esc(t('partnerAccounts'))}</span>${accounts}</div>

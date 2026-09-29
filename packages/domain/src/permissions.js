@@ -24,6 +24,8 @@ export const PERMISSIONS = Object.freeze({
   'voucher.validate': Object.freeze([MANAGER, STAFF]),
   'redemption.create': Object.freeze([MANAGER, STAFF]),
   'redemption.void': Object.freeze([MANAGER]),
+  'commission.list': Object.freeze([PLATFORM_ADMIN, TENANT_ADMIN]),
+  'commission.view_own': Object.freeze([PARTNER_ADMIN, REFERRER]),
 });
 
 /** @typedef {keyof typeof PERMISSIONS} Permission */

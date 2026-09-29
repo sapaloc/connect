@@ -4,6 +4,7 @@ import { icon, navItem, visibleNav } from '../nav.js';
 import { getTheme } from '../theme.js';
 import { counterPanel, mountCounter } from './counter.js';
 import { merchantsPanel, mountMerchants } from './merchants.js';
+import { mountMy, myPanel } from './my.js';
 import { mountPartners, partnersPanel } from './partners.js';
 import { mountTeam, teamPanel } from './team.js';
 import { mountVouchers, vouchersPanel } from './vouchers.js';
@@ -205,5 +206,6 @@ export function counterView(app) {
 
 /** @param {App} app */
 export function myView(app) {
-  render(app, '/my', `<section class="card-sw">${emptyState(t('myTitle'), t('myEmpty'), 'qr')}</section>`);
+  render(app, '/my', myPanel());
+  mountMy(app);
 }

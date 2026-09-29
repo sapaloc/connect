@@ -1,4 +1,4 @@
-import { commercialRuleFromPercents, PARTNER_STATUSES, PARTNER_TYPES, partnerAccountRole, RELATIONSHIP_KINDS } from '#domain';
+import { can, commercialRuleFromPercents, PARTNER_STATUSES, PARTNER_TYPES, partnerAccountRole, RELATIONSHIP_KINDS } from '#domain';
 import { randomUUID } from 'node:crypto';
 import { actorOf, recordAudit } from '../audit/audit.js';
 import { authed } from '../auth/guard.js';
@@ -11,6 +11,7 @@ import { HttpError } from '../http/errors.js';
 import { readJson, stringField } from '../http/request.js';
 import { sendJson } from '../http/respond.js';
 import { merchantNames, scopeFilter, UUID_PATTERN } from '../merchants/scope.js';
+import { partnerStats } from './stats.js';
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const RATE_FIELDS = /** @type {const} */ ([
@@ -186,7 +187,15 @@ async function listPartners(req, res, ctx) {
     .find({ ...scopeFilter(session, params.get('merchantId')), ...(status ? { status } : {}) }, { sort: { name: 1 }, limit: 500 })
     .toArray();
   const extra = await related(rows);
-  sendJson(res, 200, { partners: rows.map((partner) => partnerView(partner, extra)) });
+  const withCommission = can(session.role, 'commission.list');
+  const stats = await partnerStats(
+    rows.map((partner) => partner._id),
+    { withCommission },
+  );
+  sendJson(res, 200, {
+    partners: rows.map((partner) => ({ ...partnerView(partner, extra), stats: stats.get(partner._id) })),
+    withCommission,
+  });
 }
 
 /**

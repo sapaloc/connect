@@ -144,14 +144,14 @@ describe('anonymous activation', () => {
     assert.notEqual(res.body.voucher.code, code);
   });
 
-  it('the counter can look the voucher up but not redeem it until commission is enabled', async () => {
+  it('the counter looks the voucher up and redeems it like a direct one', async () => {
     const staff = await signedIn('staff@number160.local');
     const found = await staff.get(`/api/v1/vouchers/${code}`);
     assert.equal(found.status, 200);
     assert.equal(found.body.voucher.source, 'REFERRAL');
     const res = await staff.post(`/api/v1/vouchers/${code}/redeem`, { grossAmount: '2600000' });
-    assert.equal(res.status, 409);
-    assert.equal(res.body.error.code, 'REFERRAL_REDEEM_UNAVAILABLE');
+    assert.equal(res.status, 200);
+    assert.equal(res.body.voucher.redemption.payableAmount, '2418000.0000');
   });
 
   it('a new rule version applies to new activations only', async () => {

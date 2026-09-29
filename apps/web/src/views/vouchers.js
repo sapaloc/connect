@@ -123,6 +123,7 @@ export function mountVouchers(app) {
   const profile = /** @type {import('../api.js').Profile} */ (app.state.profile);
   const platform = profile.activeRole?.role === 'PLATFORM_ADMIN';
   const canVoid = profile.permissions.includes('voucher.void');
+  const canVoidRedemption = profile.permissions.includes('redemption.void');
   /** @type {Voucher[]} */
   let vouchers = [];
 
@@ -145,6 +146,7 @@ export function mountVouchers(app) {
           <td>
             <span class="d-block fw-semibold font-monospace" translate="no">${esc(formatVoucherCode(v.code))}</span>
             ${v.customerName ? `<span class="d-block small text-muted">${esc(v.customerName)}</span>` : ''}
+            ${v.source === 'REFERRAL' ? `<span class="d-block small text-muted">${esc(t('sourceReferral'))}</span>` : ''}
           </td>
           ${platform ? `<td data-label="${esc(t('merchant'))}">${esc(v.merchantName ?? '')}</td>` : ''}
           <td data-label="${esc(t('discount'))}">${esc(discountText(v))}</td>
@@ -154,6 +156,7 @@ export function mountVouchers(app) {
             <div class="d-flex flex-wrap gap-2 justify-content-md-end">
               <button type="button" class="btn btn-sm btn-outline-secondary" data-view="${esc(v.code)}">${esc(t('view'))}</button>
               ${canVoid && v.status === 'ACTIVE' ? `<button type="button" class="btn btn-sm btn-outline-danger" data-void="${esc(v.code)}">${esc(t('voidAction'))}</button>` : ''}
+              ${canVoidRedemption && v.status === 'REDEEMED' ? `<button type="button" class="btn btn-sm btn-outline-danger" data-void-redemption="${esc(v.code)}">${esc(t('voidRedemption'))}</button>` : ''}
             </div>
           </td>
         </tr>`,
@@ -204,6 +207,19 @@ export function mountVouchers(app) {
     if (viewCode) {
       const voucher = vouchers.find((v) => v.code === viewCode);
       if (voucher) openVoucherDialog(voucher);
+      return;
+    }
+    const redeemedCode = button.getAttribute('data-void-redemption');
+    if (redeemedCode) {
+      const reason = prompt(t('voidRedemptionPrompt', { code: formatVoucherCode(redeemedCode) }))?.trim();
+      if (!reason) return;
+      try {
+        await api('POST', `/api/v1/vouchers/${encodeURIComponent(redeemedCode)}/void-redemption`, { reason });
+        showMessage(t('redemptionVoided', { code: formatVoucherCode(redeemedCode) }), 'success', 'voucher-message');
+        await load();
+      } catch (error) {
+        showMessage(errorText(error), 'error', 'voucher-message');
+      }
       return;
     }
     const voidCode = button.getAttribute('data-void');
