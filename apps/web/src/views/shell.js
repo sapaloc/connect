@@ -2,6 +2,7 @@ import { esc } from '../dom.js';
 import { getLang, t } from '../i18n.js';
 import { icon, navItem, visibleNav } from '../nav.js';
 import { getTheme } from '../theme.js';
+import { merchantsPanel, mountMerchants } from './merchants.js';
 import { mountTeam, teamPanel } from './team.js';
 
 /** @typedef {import('../main.js').App} App */
@@ -63,8 +64,8 @@ export function appLayout(app, current, { title, content }) {
       <a class="skip-link" href="#main">${esc(t('skipToContent'))}</a>
       <aside class="sb" id="sidebar" aria-label="${esc(t('menu'))}">
         <div class="sb-head">
-          <span class="brand brand-on-dark">CONNECT</span>
-          <span class="brand-mark" aria-hidden="true">C</span>
+          <span class="brand brand-on-dark">MYCONNECT</span>
+          <span class="brand-mark" aria-hidden="true">M</span>
           <button type="button" class="icon-btn sb-close" data-drawer="close" aria-label="${esc(t('closeMenu'))}">${icon('close')}</button>
         </div>
         <nav class="sb-nav">${sideNav}</nav>
@@ -173,6 +174,12 @@ export function consoleView(app) {
 export function teamView(app) {
   render(app, '/console/team', teamPanel(/** @type {import('../api.js').Profile} */ (app.state.profile)));
   mountTeam(app);
+}
+
+/** @param {App} app */
+export function merchantsView(app) {
+  render(app, '/console/merchants', merchantsPanel());
+  mountMerchants(app);
 }
 
 /** @param {App} app */

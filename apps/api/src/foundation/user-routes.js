@@ -90,19 +90,20 @@ async function listUsers(req, res, ctx) {
 }
 
 /**
- * Creates or re-sends an invitation. Re-sending revokes the previous link (§8.1).
- * The link is returned once to the admin, who sends it to the person (no email provider in V1).
- * @type {import('../http/router.js').Handler}
+ * @typedef {{ email: string, displayName: string, role: string, preferredLanguage: 'en' | 'vi' }} Invitee
  */
-async function inviteUser(req, res, ctx) {
-  const session = sessionOf(ctx);
-  const body = await readJson(req);
+
+/**
+ * Reads and checks the person to invite; the acting role must be allowed to grant `role`.
+ * @param {Record<string, unknown>} body
+ * @param {import('../auth/session.js').Session} session
+ * @returns {Invitee}
+ */
+export function parseInvitee(body, session) {
   const email = stringField(body, 'email', { max: 254 }).trim().toLowerCase();
   const displayName = stringField(body, 'displayName', { max: 120 }).trim();
   const role = stringField(body, 'role', { max: 32 });
   const language = stringField(body, 'preferredLanguage', { max: 2, optional: true }) || 'en';
-  const tenantId = targetTenant(session, body.tenantId);
-
   if (!EMAIL_PATTERN.test(email)) throw new HttpError(422, 'VALIDATION', 'email is invalid', { details: { field: 'email' } });
   if (!displayName) throw new HttpError(422, 'VALIDATION', 'displayName is required', { details: { field: 'displayName' } });
   if (language !== 'vi' && language !== 'en') {
@@ -111,69 +112,90 @@ async function inviteUser(req, res, ctx) {
   if (!canInvite(/** @type {string} */ (session.role), role)) {
     throw new HttpError(403, 'FORBIDDEN', 'You cannot invite this role');
   }
+  return { email, displayName, role, preferredLanguage: language };
+}
 
-  const result = await withTransaction(async (tx) => {
-    const tenants = await collection('tenants');
-    if (!(await tenants.countDocuments({ _id: tenantId, status: 'ACTIVE' }, { session: tx, limit: 1 }))) {
-      throw new HttpError(404, 'TENANT_NOT_FOUND', 'Tenant not found');
-    }
+/**
+ * Creates or re-sends an invitation to a tenant role; an active account just gets the extra role.
+ * Re-sending revokes the previous link (§8.1). The tenant must be ACTIVE (it may be created in `tx`).
+ * @param {import('node:http').IncomingMessage} req
+ * @param {import('../http/router.js').Context} ctx
+ * @param {Invitee & { tenantId: string }} input
+ * @param {import('mongodb').ClientSession} tx
+ */
+export async function inviteMember(req, ctx, { email, displayName, role, preferredLanguage, tenantId }, tx) {
+  const session = sessionOf(ctx);
+  const tenants = await collection('tenants');
+  if (!(await tenants.countDocuments({ _id: tenantId, status: 'ACTIVE' }, { session: tx, limit: 1 }))) {
+    throw new HttpError(404, 'TENANT_NOT_FOUND', 'Tenant not found');
+  }
 
-    const users = await collection('users');
-    const now = new Date();
-    let user = await users.findOne({ email }, { session: tx, projection: { status: 1 } });
-    if (user && user.status !== 'INVITED' && user.status !== 'ACTIVE') {
-      throw new HttpError(409, 'USER_NOT_INVITABLE', 'This account is blocked or ended');
-    }
-    if (!user) {
-      user = { _id: randomUUID(), status: 'INVITED' };
-      await users.insertOne(
-        {
-          _id: user._id,
-          email,
-          displayName,
-          status: 'INVITED',
-          preferredLanguage: language,
-          passwordHash: null,
-          passwordChangedAt: null,
-          roles: [],
-          createdAt: now,
-          updatedAt: now,
-        },
-        { session: tx },
-      );
-    }
-    await grantRole(user._id, { role, tenantId, createdBy: session.userId }, { session: tx });
-
-    // An active account just gets the extra role; it signs in with its current password.
-    if (user.status === 'ACTIVE') {
-      await recordAudit(
-        { ...actorOf(ctx), tenantId, eventType: 'ROLE_GRANTED', entityType: 'user_account', entityId: user._id, after: { role } },
-        { session: tx },
-      );
-      return { userId: user._id, status: 'ACTIVE', inviteUrl: null, expiresAt: null };
-    }
-
-    const link = await issueLink('invitations', { userId: user._id, ttlMs: INVITATION_TTL_MS, createdBy: session.userId }, tx);
-    await recordAudit(
+  const users = await collection('users');
+  const now = new Date();
+  let user = await users.findOne({ email }, { session: tx, projection: { status: 1 } });
+  if (user && user.status !== 'INVITED' && user.status !== 'ACTIVE') {
+    throw new HttpError(409, 'USER_NOT_INVITABLE', 'This account is blocked or ended');
+  }
+  if (!user) {
+    user = { _id: randomUUID(), status: 'INVITED' };
+    await users.insertOne(
       {
-        ...actorOf(ctx),
-        tenantId,
-        eventType: 'INVITATION_CREATED',
-        entityType: 'invitation',
-        entityId: link.linkId,
-        after: { email, role },
+        _id: user._id,
+        email,
+        displayName,
+        status: 'INVITED',
+        preferredLanguage,
+        passwordHash: null,
+        passwordChangedAt: null,
+        roles: [],
+        createdAt: now,
+        updatedAt: now,
       },
       { session: tx },
     );
-    // Token in the URL fragment: never sent to the server or leaked through Referer / access logs.
-    return {
-      userId: user._id,
-      status: 'INVITED',
-      inviteUrl: `${publicOrigin(req)}/invite#${link.token}`,
-      expiresAt: link.expiresAt.toISOString(),
-    };
-  });
+  }
+  await grantRole(user._id, { role, tenantId, createdBy: session.userId }, { session: tx });
 
+  // An active account just gets the extra role; it signs in with its current password.
+  if (user.status === 'ACTIVE') {
+    await recordAudit(
+      { ...actorOf(ctx), tenantId, eventType: 'ROLE_GRANTED', entityType: 'user_account', entityId: user._id, after: { role } },
+      { session: tx },
+    );
+    return { userId: user._id, status: 'ACTIVE', inviteUrl: null, expiresAt: null };
+  }
+
+  const link = await issueLink('invitations', { userId: user._id, ttlMs: INVITATION_TTL_MS, createdBy: session.userId }, tx);
+  await recordAudit(
+    {
+      ...actorOf(ctx),
+      tenantId,
+      eventType: 'INVITATION_CREATED',
+      entityType: 'invitation',
+      entityId: link.linkId,
+      after: { email, role },
+    },
+    { session: tx },
+  );
+  // Token in the URL fragment: never sent to the server or leaked through Referer / access logs.
+  return {
+    userId: user._id,
+    status: 'INVITED',
+    inviteUrl: `${publicOrigin(req)}/invite#${link.token}`,
+    expiresAt: link.expiresAt.toISOString(),
+  };
+}
+
+/**
+ * The link is returned once to the admin, who sends it to the person (no email provider in V1).
+ * @type {import('../http/router.js').Handler}
+ */
+async function inviteUser(req, res, ctx) {
+  const session = sessionOf(ctx);
+  const body = await readJson(req);
+  const invitee = parseInvitee(body, session);
+  const tenantId = targetTenant(session, body.tenantId);
+  const result = await withTransaction((tx) => inviteMember(req, ctx, { ...invitee, tenantId }, tx));
   sendJson(res, 201, result);
 }
 

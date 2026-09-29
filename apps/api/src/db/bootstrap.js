@@ -1,4 +1,4 @@
-import { ROLES } from '#domain';
+import { merchantSlug, ROLES } from '#domain';
 import { randomUUID } from 'node:crypto';
 import { hashPassword } from '../auth/password.js';
 import { collection } from './mongo.js';
@@ -50,21 +50,30 @@ export async function ensureTenant(name, options = {}) {
   const tenants = await collection('tenants');
   const found = await tenants.findOne({ name }, { ...options, projection: { _id: 1 } });
   if (found) return /** @type {string} */ (found._id);
-  const tenantId = randomUUID();
-  await tenants.insertOne(
-    {
-      _id: tenantId,
-      name,
-      status: 'ACTIVE',
-      timezone: 'Asia/Ho_Chi_Minh',
-      currency: 'VND',
-      internalLanguages: ['en', 'vi'],
-      organization: { partyId: randomUUID(), legalName: name, displayName: name, organizationReference: null },
-      createdAt: new Date(),
-    },
-    options,
-  );
-  return tenantId;
+  const tenant = newTenant({ name, slug: merchantSlug(name) });
+  await tenants.insertOne(tenant, options);
+  return tenant._id;
+}
+
+/**
+ * A new ACTIVE merchant (tenant) document, operated by an organization of the same name.
+ * @param {{ name: string, slug: string, contactEmail?: string | null, contactPhone?: string | null, address?: string | null }} input
+ */
+export function newTenant({ name, slug, contactEmail = null, contactPhone = null, address = null }) {
+  return {
+    _id: randomUUID(),
+    name,
+    slug,
+    status: 'ACTIVE',
+    timezone: 'Asia/Ho_Chi_Minh',
+    currency: 'VND',
+    internalLanguages: ['en', 'vi'],
+    organization: { partyId: randomUUID(), legalName: name, displayName: name, organizationReference: null },
+    contactEmail,
+    contactPhone,
+    address,
+    createdAt: new Date(),
+  };
 }
 
 /**

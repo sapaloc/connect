@@ -606,18 +606,22 @@ body {
 }
 
 .pill-invited,
-.pill-onboarding {
+.pill-onboarding,
+.pill-paused {
   background: #f4e4c8;
   color: #8e6322;
 }
 
 .pill-blocked,
-.pill-ended {
+.pill-ended,
+.pill-void,
+.pill-expired {
   background: #efd3cf;
   color: #a8463f;
 }
 
-.pill-info {
+.pill-info,
+.pill-redeemed {
   background: #d8e6dd;
   color: #2f6f58;
 }

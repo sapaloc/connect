@@ -6,7 +6,7 @@ const ALL_ROLES = Object.values(ROLES);
 
 /** Expected grants per role; any change to the matrix must update this table on purpose. */
 const EXPECTED = {
-  PLATFORM_ADMIN: ['surface.console', 'user.list', 'user.invite', 'user.reset_link'],
+  PLATFORM_ADMIN: ['surface.console', 'merchant.manage', 'user.list', 'user.invite', 'user.reset_link'],
   TENANT_ADMIN: ['surface.console', 'user.list', 'user.invite', 'user.reset_link', 'commercial_rule.manage'],
   MANAGER: ['surface.console', 'surface.counter', 'voucher.validate', 'redemption.create', 'redemption.void'],
   STAFF: ['surface.counter', 'voucher.validate', 'redemption.create'],
