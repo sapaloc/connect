@@ -55,6 +55,7 @@ jobs:
           fi
           pnpm migrate
 
+      # Creates the test accounts only on the first deploy; later runs skip (reset: Reset UAT database workflow).
       - name: Seed UAT test accounts
         env:
           APP_ENV: uat

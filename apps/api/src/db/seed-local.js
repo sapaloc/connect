@@ -35,19 +35,38 @@ export async function seed(client, password) {
   return tenantId;
 }
 
-async function main() {
-  if (!canSeedTestAccounts) throw new Error(`seed: refused, APP_ENV is "${env.appEnv}" (only local/test/uat)`);
-  requireEnv('databaseUrl', 'seedPassword');
-  if (passwordPolicyErrors(env.seedPassword).length) throw new Error('seed: SEED_PASSWORD does not meet the password policy');
-  const client = new pg.Client(connectionConfig(env.databaseUrl));
+/**
+ * True once any seed account exists, so later runs never touch passwords or roles changed during testing.
+ * @param {import('pg').Client} client
+ */
+export async function isSeeded(client) {
+  const { rows } = await client.query('SELECT 1 FROM user_account WHERE email_or_login = ANY($1) LIMIT 1', [
+    SEED_USERS.map((user) => user.email),
+  ]);
+  return rows.length > 0;
+}
+
+export function assertCanSeed() {
+  if (!canSeedTestAccounts) throw new Error(`refused, APP_ENV is "${env.appEnv}" (only local/test/uat)`);
+  requireEnv('seedPassword');
+  if (passwordPolicyErrors(env.seedPassword).length) throw new Error('SEED_PASSWORD does not meet the password policy');
+}
+
+/** @param {string} connectionString */
+export async function seedOnce(connectionString) {
+  const client = new pg.Client(connectionConfig(connectionString));
   await client.connect();
   try {
+    if (await isSeeded(client)) {
+      console.log('seed: skipped, test accounts already exist (use pnpm db:reset to start over)');
+      return;
+    }
     await client.query('BEGIN');
     await seed(client, env.seedPassword);
     await client.query('COMMIT');
     console.log(`seed: ${SEED_USERS.length} accounts in tenant ${SEED_TENANT} (password from SEED_PASSWORD)`);
   } catch (error) {
-    await client.query('ROLLBACK');
+    await client.query('ROLLBACK').catch(() => {});
     throw error;
   } finally {
     await client.end();
@@ -55,5 +74,7 @@ async function main() {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  await main();
+  assertCanSeed();
+  requireEnv('databaseUrl');
+  await seedOnce(env.databaseUrl);
 }

@@ -34,8 +34,17 @@ pnpm seed                 # local/test/uat (refused on production): Platform Adm
 DATABASE_URL=<uat pooler url> pnpm user:create --email a@b.vn --name "Name" --role TENANT_ADMIN --tenant Number160
 ```
 
-UAT gets the same accounts on every deploy (after migrations) with the password from the `UAT_SEED_PASSWORD`
-secret; share it privately, never in the repo. `user:create` prompts for the password; it is never passed as an argument or committed. Other people are
+`pnpm seed` only creates the accounts the first time; later runs skip, so passwords and roles changed during
+testing are kept. UAT runs it after migrations on every deploy (password from the `UAT_SEED_PASSWORD` secret,
+used only on that first run). Share the password privately, never in the repo.
+
+To start over with an empty database plus fresh test accounts (local/test/uat only, never production):
+
+```bash
+pnpm db:reset --confirm local   # --confirm must repeat APP_ENV
+```
+
+On UAT use GitHub Actions → **Reset UAT database** → Run workflow on `uat`, typing `reset uat`. `user:create` prompts for the password; it is never passed as an argument or committed. Other people are
 invited from Console → Team; the invitation (72h) and reset (1h) links are shown once to the admin, who sends
 them by Zalo or email.
 
