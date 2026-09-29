@@ -4,9 +4,12 @@ import { api, fetchProfile, SESSION_ENDED } from './api.js';
 import { errorText, getLang, setLang, t } from './i18n.js';
 import { canOpen, navItem } from './nav.js';
 import { applyTheme, toggleTheme } from './theme.js';
+import { stopScanner } from './scanner.js';
 import { forgotView, inviteView, loginView, resetView, selectRoleView } from './views/auth.js';
+import { homeView } from './views/home.js';
 import { showMessage } from './views/common.js';
-import { consoleView, counterView, myView, teamView } from './views/shell.js';
+import { consoleView, counterView, merchantsView, myView, teamView, vouchersView } from './views/shell.js';
+import { voucherPublicView } from './views/voucher-public.js';
 
 /**
  * @typedef {{
@@ -20,11 +23,18 @@ import { consoleView, counterView, myView, teamView } from './views/shell.js';
  */
 
 /** @type {Record<string, (app: App) => void>} */
-const PUBLIC_ROUTES = { '/login': loginView, '/forgot': forgotView, '/invite': inviteView, '/reset': resetView };
+const PUBLIC_ROUTES = { '/': homeView, '/login': loginView, '/forgot': forgotView, '/invite': inviteView, '/reset': resetView };
 
 /** Signed-in pages; who may open each one is declared in nav.js. */
 /** @type {Record<string, (app: App) => void>} */
-const PAGE_ROUTES = { '/console': consoleView, '/console/team': teamView, '/counter': counterView, '/my': myView };
+const PAGE_ROUTES = {
+  '/console': consoleView,
+  '/console/merchants': merchantsView,
+  '/console/vouchers': vouchersView,
+  '/console/team': teamView,
+  '/counter': counterView,
+  '/my': myView,
+};
 
 /** @type {{ text: string, tone: 'error' | 'success' | 'info' } | null} */
 let pendingFlash = null;
@@ -57,7 +67,10 @@ function route() {
   const path = location.pathname.replace(/\/+$/, '') || '/';
   const profile = app.state.profile;
   document.documentElement.lang = getLang();
+  stopScanner();
 
+  const voucherPath = /^\/v\/([^/]+)$/.exec(path);
+  if (voucherPath) return voucherPublicView(app, decodeURIComponent(voucherPath[1]));
   if (PUBLIC_ROUTES[path]) {
     if (path === '/login' && profile?.activeRole) return app.navigate(/** @type {string} */ (profile.landing), { replace: true });
     PUBLIC_ROUTES[path](app);
@@ -73,7 +86,7 @@ function route() {
     return app.navigate(/** @type {string} */ (profile.landing), { replace: true });
   }
   view(app);
-  document.title = `${t(item.label)} · Connect`;
+  document.title = `${t(item.label)} · MyConnect`;
 }
 
 /** @param {boolean} open */

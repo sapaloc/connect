@@ -1,6 +1,8 @@
 import { authRoutes } from '../foundation/auth-routes.js';
 import { health } from '../foundation/health.js';
 import { userRoutes } from '../foundation/user-routes.js';
+import { merchantRoutes } from '../merchants/merchant-routes.js';
+import { voucherRoutes } from '../vouchers/voucher-routes.js';
 
 /**
  * @typedef {{ params: Record<string, string>, requestId: string, session?: import('../auth/session.js').Session }} Context
@@ -13,6 +15,8 @@ const definitions = [
   { method: 'GET', path: '/api/v1/health', handler: health },
   ...authRoutes,
   ...userRoutes,
+  ...merchantRoutes,
+  ...voucherRoutes,
 ];
 
 const routes = definitions.map(({ method, path, handler }) => {

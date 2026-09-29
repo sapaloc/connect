@@ -9,6 +9,7 @@ export const COLLECTIONS = Object.freeze({
   passwordResets: 'password_resets',
   rateLimits: 'rate_limits',
   auditEvents: 'audit_events',
+  vouchers: 'vouchers',
   schemaVersions: 'schema_versions',
 });
 

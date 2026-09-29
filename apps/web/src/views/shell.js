@@ -2,7 +2,10 @@ import { esc } from '../dom.js';
 import { getLang, t } from '../i18n.js';
 import { icon, navItem, visibleNav } from '../nav.js';
 import { getTheme } from '../theme.js';
+import { counterPanel, mountCounter } from './counter.js';
+import { merchantsPanel, mountMerchants } from './merchants.js';
 import { mountTeam, teamPanel } from './team.js';
+import { mountVouchers, vouchersPanel } from './vouchers.js';
 
 /** @typedef {import('../main.js').App} App */
 /** @typedef {import('../nav.js').NavItem} NavItem */
@@ -63,8 +66,8 @@ export function appLayout(app, current, { title, content }) {
       <a class="skip-link" href="#main">${esc(t('skipToContent'))}</a>
       <aside class="sb" id="sidebar" aria-label="${esc(t('menu'))}">
         <div class="sb-head">
-          <span class="brand brand-on-dark">CONNECT</span>
-          <span class="brand-mark" aria-hidden="true">C</span>
+          <span class="brand brand-on-dark">MYCONNECT</span>
+          <span class="brand-mark" aria-hidden="true">M</span>
           <button type="button" class="icon-btn sb-close" data-drawer="close" aria-label="${esc(t('closeMenu'))}">${icon('close')}</button>
         </div>
         <nav class="sb-nav">${sideNav}</nav>
@@ -176,8 +179,21 @@ export function teamView(app) {
 }
 
 /** @param {App} app */
+export function merchantsView(app) {
+  render(app, '/console/merchants', merchantsPanel());
+  mountMerchants(app);
+}
+
+/** @param {App} app */
+export function vouchersView(app) {
+  render(app, '/console/vouchers', vouchersPanel(app));
+  mountVouchers(app);
+}
+
+/** @param {App} app */
 export function counterView(app) {
-  render(app, '/counter', `<section class="card-sw">${emptyState(t('counterTitle'), t('counterEmpty'), 'scan')}</section>`);
+  render(app, '/counter', counterPanel());
+  mountCounter(app);
 }
 
 /** @param {App} app */
