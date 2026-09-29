@@ -6,6 +6,7 @@ const names = {
   mongodbUri: 'MONGODB_URI',
   sessionSecret: 'SESSION_SECRET',
   internalJobSecret: 'INTERNAL_JOB_SECRET',
+  cronSecret: 'CRON_SECRET',
   seedPassword: 'SEED_PASSWORD',
 };
 
@@ -19,6 +20,7 @@ export const env = Object.freeze({
   dbPoolMax: Number(source.DB_POOL_MAX || 5),
   sessionSecret: source.SESSION_SECRET || '',
   internalJobSecret: source.INTERNAL_JOB_SECRET || '',
+  cronSecret: source.CRON_SECRET || '',
   storage: Object.freeze({
     driver: source.STORAGE_DRIVER || 'local',
     bucket: source.STORAGE_BUCKET || '',
