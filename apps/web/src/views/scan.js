@@ -1,4 +1,4 @@
-import { parseVoucherCode } from '#domain';
+import { parseReferralToken, parseVoucherCode } from '#domain';
 import { $, esc } from '../dom.js';
 import { t } from '../i18n.js';
 import { icon } from '../nav.js';
@@ -33,8 +33,9 @@ export function scanBox() {
 /**
  * @param {ParentNode} root
  * @param {(code: string) => void} onCode called with a canonical voucher code
+ * @param {(token: string) => void} [onReferral] called with a partner QR token; without it a partner QR is refused
  */
-export function mountScan(root, onCode) {
+export function mountScan(root, onCode, onReferral) {
   const view = $('#scan-view', root);
   const start = /** @type {HTMLButtonElement} */ ($('#scan-start', root));
   const stop = /** @type {HTMLButtonElement} */ ($('#scan-stop', root));
@@ -50,14 +51,16 @@ export function mountScan(root, onCode) {
   /** @param {string} text */
   const accept = (text) => {
     const code = parseVoucherCode(text);
-    if (!code) {
-      showMessage(t('unknownCode'), 'error', 'scan-message');
+    const token = code ? null : parseReferralToken(text);
+    if (!code && !(token && onReferral)) {
+      showMessage(t(token ? 'partnerQrNotVoucher' : 'unknownCode'), 'error', 'scan-message');
       return false;
     }
     stopScanner();
     setScanning(false);
     showMessage('', 'info', 'scan-message');
-    onCode(code);
+    if (code) onCode(code);
+    else if (token && onReferral) onReferral(token);
     return true;
   };
 

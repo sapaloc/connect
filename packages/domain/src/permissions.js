@@ -14,6 +14,9 @@ export const PERMISSIONS = Object.freeze({
   'user.list': Object.freeze([PLATFORM_ADMIN, TENANT_ADMIN]),
   'user.invite': Object.freeze([PLATFORM_ADMIN, TENANT_ADMIN]),
   'user.reset_link': Object.freeze([PLATFORM_ADMIN, TENANT_ADMIN]),
+  'merchant.settings': Object.freeze([TENANT_ADMIN]),
+  'partner.list': Object.freeze([PLATFORM_ADMIN, TENANT_ADMIN, MANAGER]),
+  'partner.manage': Object.freeze([TENANT_ADMIN]),
   'commercial_rule.manage': Object.freeze([TENANT_ADMIN]),
   'voucher.issue': Object.freeze([TENANT_ADMIN, MANAGER]),
   'voucher.list': Object.freeze([PLATFORM_ADMIN, TENANT_ADMIN, MANAGER]),
@@ -21,6 +24,8 @@ export const PERMISSIONS = Object.freeze({
   'voucher.validate': Object.freeze([MANAGER, STAFF]),
   'redemption.create': Object.freeze([MANAGER, STAFF]),
   'redemption.void': Object.freeze([MANAGER]),
+  'commission.list': Object.freeze([PLATFORM_ADMIN, TENANT_ADMIN]),
+  'commission.view_own': Object.freeze([PARTNER_ADMIN, REFERRER]),
 });
 
 /** @typedef {keyof typeof PERMISSIONS} Permission */

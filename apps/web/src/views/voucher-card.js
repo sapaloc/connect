@@ -11,6 +11,21 @@ export function statusPill(voucher) {
 }
 
 /**
+ * Card header in the merchant's colour, with its logo on a white chip so any logo stays legible.
+ * @param {{ eyebrow: string, merchantName: string, sub?: string, brand?: import('../voucher-ui.js').Brand | null }} options
+ */
+export function cardHead({ eyebrow, merchantName, sub = '', brand = null }) {
+  const style = brand?.color ? ` style="--vcard-bg: ${esc(brand.color)}; --vcard-fg: ${esc(brand.textColor ?? '#FFFFFF')}"` : '';
+  return `
+      <header class="vcard-head"${style}>
+        ${brand?.logoUrl ? `<span class="vcard-logo"><img src="${esc(brand.logoUrl)}" alt="${esc(merchantName)}" /></span>` : ''}
+        <span class="vcard-eyebrow">${esc(eyebrow)}</span>
+        <span class="vcard-merchant" translate="no">${esc(merchantName)}</span>
+        ${sub ? `<span class="vcard-customer">${esc(sub)}</span>` : ''}
+      </header>`;
+}
+
+/**
  * The voucher as the customer sees it. The QR is filled in by fillQr once in the DOM.
  * @param {Voucher} voucher
  * @param {{ showCustomer?: boolean }} [options]
@@ -19,11 +34,12 @@ export function voucherCard(voucher, { showCustomer = false } = {}) {
   const active = voucher.status === 'ACTIVE';
   return `
     <article class="vcard${active ? '' : ' vcard-off'}">
-      <header class="vcard-head">
-        <span class="vcard-eyebrow">${esc(t('voucherTitle'))}</span>
-        <span class="vcard-merchant" translate="no">${esc(voucher.merchantName ?? 'MyConnect')}</span>
-        ${showCustomer && voucher.customerName ? `<span class="vcard-customer">${esc(voucher.customerName)}</span>` : ''}
-      </header>
+      ${cardHead({
+        eyebrow: t('voucherTitle'),
+        merchantName: voucher.merchantName ?? 'MyConnect',
+        sub: showCustomer && voucher.customerName ? voucher.customerName : '',
+        brand: voucher.brand,
+      })}
       <div class="vcard-body">
         <p class="vcard-discount">${esc(discountText(voucher))}</p>
         <div class="vcard-qr"><img data-qr="${esc(voucher.code)}" alt="QR ${esc(formatVoucherCode(voucher.code))}" width="220" height="220" /></div>

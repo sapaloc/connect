@@ -1,6 +1,7 @@
 import { merchantSlug } from '#domain';
 import { pathToFileURL } from 'node:url';
 import { env, requireEnv } from '../config/env.js';
+import { newReferralMedium } from './bootstrap.js';
 import { decimalField } from './decimal.js';
 import { closeClient, COLLECTIONS, getDb } from './mongo.js';
 
@@ -8,7 +9,7 @@ import { closeClient, COLLECTIONS, getDb } from './mongo.js';
  * Bump when a validator or index changes. Changes must keep old documents valid
  * (add optional fields; backfill in a script before making a field required).
  */
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 7;
 
 const DAY_SECONDS = 24 * 60 * 60;
 const uuid = { bsonType: 'string', pattern: '^[0-9a-f-]{36}$' };
@@ -91,8 +92,8 @@ const DEFINITIONS = {
         createdAt: date,
       },
     },
-    // slug, contactEmail, contactPhone, address are optional and not in the validator: changing an
-    // existing validator needs collMod, which the UAT database user may not run.
+    // slug, contactEmail, contactPhone, address, vatRate, brandColor, logoAssetId are optional and not in the validator: changing
+    // an existing validator needs collMod, which the UAT database user may not run.
     indexes: [
       { key: { name: 1 }, name: 'name_uq', unique: true },
       { key: { slug: 1 }, name: 'slug_uq', unique: true, partialFilterExpression: { slug: { $type: 'string' } } },
@@ -254,6 +255,188 @@ const DEFINITIONS = {
       { key: { tenantId: 1, createdAt: -1 }, name: 'tenant_created' },
       { key: { tenantId: 1, status: 1, validUntil: 1 }, name: 'tenant_status' },
       { key: { batchId: 1 }, name: 'batch', partialFilterExpression: { batchId: { $type: 'string' } } },
+      { key: { mediumId: 1, browserContextId: 1, status: 1 }, name: 'referral_browser', partialFilterExpression: { source: 'REFERRAL' } },
+      { key: { partnerId: 1, createdAt: -1 }, name: 'referral_partner', partialFilterExpression: { source: 'REFERRAL' } },
+    ],
+  },
+
+  // Partner relationship (plan §9.2). Never deleted: ENDED keeps the history.
+  [COLLECTIONS.partners]: {
+    schema: {
+      bsonType: 'object',
+      required: ['_id', 'tenantId', 'name', 'nameKey', 'relationshipKind', 'partnerType', 'status', 'createdBy', 'createdAt', 'updatedAt'],
+      properties: {
+        _id: uuid,
+        tenantId: uuid,
+        name: text,
+        nameKey: text,
+        relationshipKind: { enum: ['COMPANY', 'INDEPENDENT_INDIVIDUAL'] },
+        partnerType: { enum: ['HOTEL', 'RESTAURANT', 'TOUR_GUIDE', 'DRIVER', 'OTHER'] },
+        status: { enum: ['ONBOARDING', 'ACTIVE', 'PAUSED', 'ENDED'] },
+        contactName: { bsonType: ['string', 'null'] },
+        contactPhone: { bsonType: ['string', 'null'] },
+        contactEmail: { bsonType: ['string', 'null'] },
+        note: { bsonType: ['string', 'null'] },
+        createdBy: uuid,
+        createdAt: date,
+        updatedAt: date,
+        endedAt: nullableDate,
+        endedBy: nullableUuid,
+        endReason: { bsonType: ['string', 'null'] },
+      },
+    },
+    indexes: [
+      { key: { tenantId: 1, nameKey: 1 }, name: 'tenant_name_uq', unique: true },
+      { key: { tenantId: 1, status: 1, name: 1 }, name: 'tenant_status' },
+    ],
+  },
+
+  // Commercial rule versions (plan §9.3): one ACTIVE per partner; vouchers snapshot the rates they were issued with.
+  [COLLECTIONS.commercialRules]: {
+    schema: {
+      bsonType: 'object',
+      required: ['_id', 'tenantId', 'partnerId', 'version', 'status', 'relationshipKind', 'totalBudgetRate', 'customerDiscountRate',
+        'effectiveFrom', 'createdBy', 'createdAt'],
+      properties: {
+        _id: uuid,
+        tenantId: uuid,
+        partnerId: uuid,
+        version: { bsonType: 'int', minimum: 1 },
+        status: { enum: ['ACTIVE', 'SUPERSEDED'] },
+        relationshipKind: { enum: ['COMPANY', 'INDEPENDENT_INDIVIDUAL'] },
+        totalBudgetRate: decimalField,
+        customerDiscountRate: decimalField,
+        companyCommissionRate: { bsonType: ['decimal', 'null'] },
+        individualShareRate: { bsonType: ['decimal', 'null'] },
+        companyNetCommissionRate: { bsonType: ['decimal', 'null'] },
+        individualCommissionRate: { bsonType: ['decimal', 'null'] },
+        effectiveFrom: date,
+        supersededAt: nullableDate,
+        createdBy: uuid,
+        createdAt: date,
+      },
+    },
+    indexes: [
+      { key: { partnerId: 1, version: 1 }, name: 'partner_version_uq', unique: true },
+      { key: { partnerId: 1 }, name: 'partner_active_uq', unique: true, partialFilterExpression: { status: 'ACTIVE' } },
+      { key: { tenantId: 1, status: 1 }, name: 'tenant_status' },
+    ],
+  },
+
+  // Partner QR (plan §9.4). A replaced QR stops working; its visits and vouchers stay.
+  [COLLECTIONS.referralMedia]: {
+    schema: {
+      bsonType: 'object',
+      required: ['_id', 'tenantId', 'partnerId', 'mediumType', 'publicToken', 'status', 'createdBy', 'createdAt'],
+      properties: {
+        _id: uuid,
+        tenantId: uuid,
+        partnerId: uuid,
+        mediumType: { enum: ['COMPANY_QR', 'LOCATION_QR', 'PERSONAL_DIGITAL_QR'] },
+        publicToken: { bsonType: 'string', pattern: '^[A-Za-z0-9_-]{22}$' },
+        status: { enum: ['ACTIVE', 'PAUSED', 'BLOCKED', 'REPLACED'] },
+        replacesMediumId: nullableUuid,
+        replacedAt: nullableDate,
+        replacedBy: nullableUuid,
+        replaceReason: { bsonType: ['string', 'null'] },
+        lastActivationAt: nullableDate,
+        createdBy: uuid,
+        createdAt: date,
+      },
+    },
+    indexes: [
+      { key: { publicToken: 1 }, name: 'public_token_uq', unique: true },
+      { key: { partnerId: 1 }, name: 'partner_active_uq', unique: true, partialFilterExpression: { status: 'ACTIVE' } },
+      { key: { tenantId: 1, partnerId: 1 }, name: 'tenant_partner' },
+    ],
+  },
+
+  // Every open of a partner link, for "Referral link opens" (plan J11). No personal data.
+  [COLLECTIONS.referralVisits]: {
+    schema: {
+      bsonType: 'object',
+      required: ['_id', 'publicToken', 'result', 'visitedAt'],
+      properties: {
+        _id: uuid,
+        publicToken: text,
+        tenantId: nullableUuid,
+        partnerId: nullableUuid,
+        mediumId: nullableUuid,
+        browserContextId: nullableUuid,
+        result: { enum: ['VALID', 'MEDIUM_INACTIVE', 'PARTNER_INACTIVE', 'NOT_FOUND'] },
+        language: { bsonType: ['string', 'null'] },
+        visitedAt: date,
+      },
+    },
+    indexes: [
+      { key: { tenantId: 1, partnerId: 1, visitedAt: -1 }, name: 'tenant_partner_visited' },
+      { key: { mediumId: 1, browserContextId: 1, visitedAt: -1 }, name: 'medium_browser' },
+    ],
+  },
+
+  // What the merchant owes a partner for one redemption (plan §9.7). Voiding the redemption voids its items.
+  [COLLECTIONS.commissionItems]: {
+    schema: {
+      bsonType: 'object',
+      required: ['_id', 'tenantId', 'voucherId', 'redemptionId', 'partnerId', 'obligationType', 'rate', 'baseAmount', 'amount', 'status', 'redeemedAt', 'createdAt'],
+      properties: {
+        _id: uuid,
+        tenantId: uuid,
+        voucherId: uuid,
+        redemptionId: uuid,
+        partnerId: uuid,
+        mediumId: nullableUuid,
+        ruleId: nullableUuid,
+        ruleVersion: { bsonType: ['int', 'null'] },
+        obligationType: { enum: ['TENANT_TO_COMPANY', 'COMPANY_TO_AFFILIATED_INDIVIDUAL', 'TENANT_TO_INDEPENDENT_INDIVIDUAL'] },
+        rate: decimalField,
+        baseAmount: decimalField,
+        amount: decimalField,
+        status: { enum: ['OPEN', 'PAID', 'VOID'] },
+        redeemedAt: date,
+        createdAt: date,
+        voidedAt: nullableDate,
+        voidedBy: nullableUuid,
+        voidReason: { bsonType: ['string', 'null'] },
+      },
+    },
+    indexes: [
+      { key: { redemptionId: 1, obligationType: 1 }, name: 'redemption_obligation_uq', unique: true },
+      { key: { tenantId: 1, partnerId: 1, status: 1 }, name: 'tenant_partner_status' },
+      { key: { partnerId: 1, redeemedAt: -1 }, name: 'partner_redeemed' },
+    ],
+  },
+
+  // Uploaded images, stored as WebP inside MongoDB (plan §21.3). Replaced images are kept, not deleted.
+  [COLLECTIONS.fileAssets]: {
+    schema: {
+      bsonType: 'object',
+      required: ['_id', 'assetType', 'data', 'mimeType', 'width', 'height', 'byteSize', 'checksumSha256', 'status', 'createdAt'],
+      properties: {
+        _id: uuid,
+        tenantId: nullableUuid,
+        assetType: { enum: ['BRAND_LOGO', 'PARTNER_LOGO', 'MICROSITE_IMAGE', 'VOUCHER_IMAGE', 'VIETQR_IMAGE', 'PAYMENT_RECEIPT'] },
+        data: { bsonType: 'binData' },
+        mimeType: { enum: ['image/webp'] },
+        width: { bsonType: 'int', minimum: 1 },
+        height: { bsonType: 'int', minimum: 1 },
+        byteSize: { bsonType: 'int', minimum: 1, maximum: 1048576 },
+        originalByteSize: { bsonType: ['int', 'null'] },
+        checksumSha256: { bsonType: 'string', pattern: '^[0-9a-f]{64}$' },
+        status: { enum: ['ACTIVE', 'REPLACED', 'RESTRICTED'] },
+        createdBy: nullableUuid,
+        createdAt: date,
+        replacedAt: nullableDate,
+      },
+    },
+    indexes: [
+      {
+        key: { tenantId: 1, assetType: 1 },
+        name: 'tenant_logo_active_uq',
+        unique: true,
+        partialFilterExpression: { assetType: 'BRAND_LOGO', status: 'ACTIVE' },
+      },
+      { key: { tenantId: 1, assetType: 1, status: 1 }, name: 'tenant_type_status' },
     ],
   },
 
@@ -274,6 +457,14 @@ async function backfill(db) {
     let slug = base;
     for (let n = 2; await tenants.countDocuments({ slug }, { limit: 1 }); n++) slug = `${base}-${n}`;
     await tenants.updateOne({ _id: tenant._id, slug: { $exists: false } }, { $set: { slug } });
+  }
+
+  const partners = db.collection(COLLECTIONS.partners);
+  const media = db.collection(COLLECTIONS.referralMedia);
+  const withQr = new Set(await media.distinct('partnerId', { status: { $in: ['ACTIVE', 'PAUSED'] } }));
+  for (const partner of await partners.find({ status: { $in: ['ACTIVE', 'PAUSED'] } }).toArray()) {
+    if (withQr.has(partner._id)) continue;
+    await media.insertOne(newReferralMedium(partner, partner.createdBy));
   }
 }
 

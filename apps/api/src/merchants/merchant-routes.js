@@ -1,13 +1,16 @@
-import { MERCHANT_SLUG_PATTERN, merchantSlug, ROLES } from '#domain';
+import { brandColorFor, MERCHANT_SLUG_PATTERN, merchantSlug, parseVatPercent, ROLES } from '#domain';
 import { actorOf, recordAudit } from '../audit/audit.js';
 import { authed } from '../auth/guard.js';
 import { newTenant } from '../db/bootstrap.js';
+import { fromDecimal128, toDecimal128 } from '../db/decimal.js';
 import { collection } from '../db/mongo.js';
 import { withTransaction } from '../db/tx.js';
+import { imageAsset, readBinary } from '../files/files.js';
 import { inviteMember, parseInvitee } from '../foundation/user-routes.js';
 import { HttpError } from '../http/errors.js';
 import { readJson, stringField } from '../http/request.js';
 import { sendJson } from '../http/respond.js';
+import { brandView } from './scope.js';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -37,6 +40,7 @@ function merchantView(tenant, counts) {
     contactEmail: tenant.contactEmail ?? null,
     contactPhone: tenant.contactPhone ?? null,
     address: tenant.address ?? null,
+    brand: brandView(tenant),
     createdAt: tenant.createdAt.toISOString(),
     admins: count.admins,
     members: count.members,
@@ -53,7 +57,13 @@ async function memberCounts(tenantIds) {
     .aggregate([
       { $match: { status: { $in: ['INVITED', 'ACTIVE'] }, 'roles.tenantId': { $in: tenantIds } } },
       { $unwind: '$roles' },
-      { $match: { 'roles.status': 'ACTIVE', 'roles.tenantId': { $in: tenantIds } } },
+      {
+        $match: {
+          'roles.status': 'ACTIVE',
+          'roles.tenantId': { $in: tenantIds },
+          'roles.role': { $in: [ROLES.TENANT_ADMIN, ROLES.MANAGER, ROLES.STAFF] },
+        },
+      },
       {
         $group: {
           _id: { tenantId: '$roles.tenantId', userId: '$_id' },
@@ -159,8 +169,155 @@ async function setMerchantStatus(req, res, ctx) {
   sendJson(res, 200, { merchant: merchantView(merchant, counts) });
 }
 
+/** @type {import('../http/router.js').Handler} */
+async function merchantSettings(_req, res, ctx) {
+  const tenants = await collection('tenants');
+  const tenant = await tenants.findOne({ _id: sessionOf(ctx).tenantId }, { projection: { name: 1, vatRate: 1, logoAssetId: 1, brandColor: 1 } });
+  if (!tenant) throw new HttpError(404, 'TENANT_NOT_FOUND', 'Merchant not found');
+  sendJson(res, 200, { name: tenant.name, vatRate: tenant.vatRate ? fromDecimal128(tenant.vatRate) : null, brand: brandView(tenant) });
+}
+
+/**
+ * VAT rate used to split VAT out of what the customer pays (Net/Net commission base, plan §7).
+ * Each referral redemption snapshots the rate in force at that moment.
+ * @type {import('../http/router.js').Handler}
+ */
+async function updateMerchantSettings(req, res, ctx) {
+  const tenantId = /** @type {string} */ (sessionOf(ctx).tenantId);
+  const body = await readJson(req);
+  let vatRate;
+  try {
+    vatRate = parseVatPercent(body.vatPercent);
+  } catch {
+    throw new HttpError(422, 'VALIDATION', 'vatPercent is invalid', { details: { field: 'vatPercent' } });
+  }
+  await withTransaction(async (tx) => {
+    const tenants = await collection('tenants');
+    const before = await tenants.findOne({ _id: tenantId }, { session: tx, projection: { vatRate: 1 } });
+    const previous = before?.vatRate ? fromDecimal128(before.vatRate) : null;
+    if (previous === vatRate) return;
+    await tenants.updateOne({ _id: tenantId }, { $set: { vatRate: toDecimal128(vatRate) } }, { session: tx });
+    await recordAudit(
+      { ...actorOf(ctx), eventType: 'MERCHANT_VAT_CHANGED', entityType: 'tenant', entityId: tenantId, before: { vatRate: previous }, after: { vatRate } },
+      { session: tx },
+    );
+  });
+  sendJson(res, 200, { vatRate });
+}
+
+/**
+ * New logo for a merchant: stored as WebP, the previous one REPLACED (kept, no longer served).
+ * @param {import('node:http').IncomingMessage} req
+ * @param {import('../http/router.js').Context} ctx
+ * @param {string} tenantId
+ */
+async function replaceLogo(req, ctx, tenantId) {
+  const type = String(req.headers['content-type'] ?? '').toLowerCase();
+  if (!type.startsWith('image/') && !type.startsWith('application/octet-stream')) {
+    throw new HttpError(415, 'IMAGE_TYPE_INVALID', 'Send the image as the request body');
+  }
+  const asset = await imageAsset(await readBinary(req), 'BRAND_LOGO');
+  return withTransaction(async (tx) => {
+    const tenants = await collection('tenants');
+    const tenant = await tenants.findOne({ _id: tenantId, status: { $in: MERCHANT_STATUSES } }, { session: tx });
+    if (!tenant) throw new HttpError(404, 'TENANT_NOT_FOUND', 'Merchant not found');
+    const now = new Date();
+    const files = await collection('fileAssets');
+    await files.updateMany(
+      { tenantId, assetType: 'BRAND_LOGO', status: 'ACTIVE' },
+      { $set: { status: 'REPLACED', replacedAt: now } },
+      { session: tx },
+    );
+    await files.insertOne({ ...asset, tenantId, createdBy: sessionOf(ctx).userId }, { session: tx });
+    await tenants.updateOne({ _id: tenantId }, { $set: { logoAssetId: asset._id } }, { session: tx });
+    await recordAudit(
+      {
+        ...actorOf(ctx),
+        tenantId,
+        eventType: 'MERCHANT_LOGO_CHANGED',
+        entityType: 'tenant',
+        entityId: tenantId,
+        before: { logoAssetId: tenant.logoAssetId ?? null },
+        after: { logoAssetId: asset._id, width: asset.width, height: asset.height, byteSize: asset.byteSize },
+      },
+      { session: tx },
+    );
+    return brandView({ ...tenant, logoAssetId: asset._id });
+  });
+}
+
+/** @type {import('../http/router.js').Handler} */
+async function uploadOwnLogo(req, res, ctx) {
+  sendJson(res, 200, { brand: await replaceLogo(req, ctx, /** @type {string} */ (sessionOf(ctx).tenantId)) });
+}
+
+/**
+ * Platform admin replaces a merchant's logo (e.g. during onboarding).
+ * @type {import('../http/router.js').Handler}
+ */
+async function uploadMerchantLogo(req, res, ctx) {
+  const id = ctx.params.id.toLowerCase();
+  if (!UUID_PATTERN.test(id)) throw new HttpError(404, 'TENANT_NOT_FOUND', 'Merchant not found');
+  sendJson(res, 200, { brand: await replaceLogo(req, ctx, id) });
+}
+
+/** @type {import('../http/router.js').Handler} */
+async function removeOwnLogo(_req, res, ctx) {
+  const tenantId = /** @type {string} */ (sessionOf(ctx).tenantId);
+  const brand = await withTransaction(async (tx) => {
+    const tenants = await collection('tenants');
+    const tenant = await tenants.findOne({ _id: tenantId }, { session: tx });
+    if (!tenant) throw new HttpError(404, 'TENANT_NOT_FOUND', 'Merchant not found');
+    if (!tenant.logoAssetId) return brandView(tenant);
+    const files = await collection('fileAssets');
+    await files.updateMany({ tenantId, assetType: 'BRAND_LOGO', status: 'ACTIVE' }, { $set: { status: 'REPLACED', replacedAt: new Date() } }, { session: tx });
+    await tenants.updateOne({ _id: tenantId }, { $set: { logoAssetId: null } }, { session: tx });
+    await recordAudit(
+      { ...actorOf(ctx), eventType: 'MERCHANT_LOGO_CHANGED', entityType: 'tenant', entityId: tenantId, before: { logoAssetId: tenant.logoAssetId }, after: { logoAssetId: null } },
+      { session: tx },
+    );
+    return brandView({ ...tenant, logoAssetId: null });
+  });
+  sendJson(res, 200, { brand });
+}
+
+/**
+ * Brand colour of the voucher header; refused when no text colour reaches WCAG AA. Empty clears it.
+ * @type {import('../http/router.js').Handler}
+ */
+async function setBrandColor(req, res, ctx) {
+  const tenantId = /** @type {string} */ (sessionOf(ctx).tenantId);
+  const body = await readJson(req);
+  let color = null;
+  if (body.brandColor !== null && body.brandColor !== undefined && body.brandColor !== '') {
+    const result = brandColorFor(body.brandColor);
+    if ('error' in result) throw new HttpError(422, result.error, 'brandColor is not usable', { details: { field: 'brandColor' } });
+    color = result.color;
+  }
+  const brand = await withTransaction(async (tx) => {
+    const tenants = await collection('tenants');
+    const tenant = await tenants.findOne({ _id: tenantId }, { session: tx });
+    if (!tenant) throw new HttpError(404, 'TENANT_NOT_FOUND', 'Merchant not found');
+    if ((tenant.brandColor ?? null) !== color) {
+      await tenants.updateOne({ _id: tenantId }, { $set: { brandColor: color } }, { session: tx });
+      await recordAudit(
+        { ...actorOf(ctx), eventType: 'MERCHANT_BRAND_COLOR_CHANGED', entityType: 'tenant', entityId: tenantId, before: { brandColor: tenant.brandColor ?? null }, after: { brandColor: color } },
+        { session: tx },
+      );
+    }
+    return brandView({ ...tenant, brandColor: color });
+  });
+  sendJson(res, 200, { brand });
+}
+
 /** @type {import('../http/router.js').RouteDef[]} */
 export const merchantRoutes = [
+  { method: 'GET', path: '/api/v1/merchant/settings', handler: authed(merchantSettings, { permission: 'partner.list' }) },
+  { method: 'POST', path: '/api/v1/merchant/settings', handler: authed(updateMerchantSettings, { permission: 'merchant.settings' }) },
+  { method: 'POST', path: '/api/v1/merchant/brand', handler: authed(setBrandColor, { permission: 'merchant.settings' }) },
+  { method: 'POST', path: '/api/v1/merchant/logo', handler: authed(uploadOwnLogo, { permission: 'merchant.settings' }) },
+  { method: 'POST', path: '/api/v1/merchant/logo/remove', handler: authed(removeOwnLogo, { permission: 'merchant.settings' }) },
+  { method: 'POST', path: '/api/v1/merchants/:id/logo', handler: authed(uploadMerchantLogo, { permission: 'merchant.manage' }) },
   { method: 'GET', path: '/api/v1/merchants', handler: authed(listMerchants, { permission: 'merchant.manage' }) },
   { method: 'POST', path: '/api/v1/merchants', handler: authed(createMerchant, { permission: 'merchant.manage' }) },
   { method: 'POST', path: '/api/v1/merchants/:id/status', handler: authed(setMerchantStatus, { permission: 'merchant.manage' }) },

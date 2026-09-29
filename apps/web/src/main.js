@@ -8,7 +8,8 @@ import { stopScanner } from './scanner.js';
 import { forgotView, inviteView, loginView, resetView, selectRoleView } from './views/auth.js';
 import { homeView } from './views/home.js';
 import { showMessage, togglePasswordReveal } from './views/common.js';
-import { consoleView, counterView, merchantsView, myView, teamView, vouchersView } from './views/shell.js';
+import { brandView, consoleView, counterView, merchantsView, myView, partnersView, teamView, vouchersView } from './views/shell.js';
+import { referralPublicView } from './views/referral-public.js';
 import { voucherPublicView } from './views/voucher-public.js';
 
 /**
@@ -31,6 +32,8 @@ const PAGE_ROUTES = {
   '/console': consoleView,
   '/console/merchants': merchantsView,
   '/console/vouchers': vouchersView,
+  '/console/partners': partnersView,
+  '/console/brand': brandView,
   '/console/team': teamView,
   '/counter': counterView,
   '/my': myView,
@@ -71,6 +74,8 @@ function route() {
 
   const voucherPath = /^\/v\/([^/]+)$/.exec(path);
   if (voucherPath) return voucherPublicView(app, decodeURIComponent(voucherPath[1]));
+  const referralPath = /^\/r\/([^/]+)$/.exec(path);
+  if (referralPath) return referralPublicView(app, decodeURIComponent(referralPath[1]));
   if (PUBLIC_ROUTES[path]) {
     if (path === '/login' && profile?.activeRole) return app.navigate(/** @type {string} */ (profile.landing), { replace: true });
     PUBLIC_ROUTES[path](app);

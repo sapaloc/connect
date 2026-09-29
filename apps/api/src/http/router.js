@@ -1,7 +1,11 @@
 import { authRoutes } from '../foundation/auth-routes.js';
+import { fileRoutes } from '../files/files.js';
 import { health } from '../foundation/health.js';
 import { userRoutes } from '../foundation/user-routes.js';
 import { merchantRoutes } from '../merchants/merchant-routes.js';
+import { myRoutes } from '../partners/my-routes.js';
+import { partnerRoutes } from '../partners/partner-routes.js';
+import { referralRoutes } from '../referrals/referral-routes.js';
 import { voucherRoutes } from '../vouchers/voucher-routes.js';
 
 /**
@@ -16,6 +20,10 @@ const definitions = [
   ...authRoutes,
   ...userRoutes,
   ...merchantRoutes,
+  ...partnerRoutes,
+  ...referralRoutes,
+  ...myRoutes,
+  ...fileRoutes,
   ...voucherRoutes,
 ];
 

@@ -10,6 +10,12 @@ export const COLLECTIONS = Object.freeze({
   rateLimits: 'rate_limits',
   auditEvents: 'audit_events',
   vouchers: 'vouchers',
+  partners: 'partners',
+  commercialRules: 'commercial_rules',
+  referralMedia: 'referral_media',
+  referralVisits: 'referral_visits',
+  commissionItems: 'commission_items',
+  fileAssets: 'file_assets',
   schemaVersions: 'schema_versions',
 });
 

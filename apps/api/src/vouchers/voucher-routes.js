@@ -1,12 +1,12 @@
 import {
   calculateDirectRedemption,
+  calculateRedemption,
   can,
   effectiveVoucherStatus,
   MoneyError,
   parseDecimal,
   parseDirectDiscount,
   parseVoucherCode,
-  ROLES,
   VOUCHER_BATCH_MAX,
   VOUCHER_CODE_ALPHABET,
   VOUCHER_CODE_LENGTH,
@@ -23,12 +23,12 @@ import { withTransaction } from '../db/tx.js';
 import { HttpError } from '../http/errors.js';
 import { clientIp, readJson, stringField } from '../http/request.js';
 import { sendJson } from '../http/respond.js';
+import { merchantBrands, merchantNames, scopeFilter, UUID_PATTERN } from '../merchants/scope.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const VN_OFFSET_MS = 7 * 60 * 60 * 1000;
 const MAX_VALIDITY_DAYS = 366;
 const LIST_LIMIT = 100;
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
 const STATUS_FILTERS = ['ACTIVE', 'REDEEMED', 'EXPIRED', 'VOID'];
 
@@ -41,10 +41,48 @@ function sessionOf(ctx) {
 function moneyToHttp(error) {
   if (error instanceof MoneyError) {
     return new HttpError(422, error.code === 'BELOW_MIN_BILL' ? 'BELOW_MIN_BILL' : 'VALIDATION', error.message, {
-      details: { field: error.field },
+      details: { field: error.field === 'grossInvoiceAmount' ? 'grossAmount' : error.field },
     });
   }
   return error;
+}
+
+const RULE_RATES = /** @type {const} */ ([
+  'totalBudgetRate',
+  'customerDiscountRate',
+  'companyCommissionRate',
+  'individualShareRate',
+  'companyNetCommissionRate',
+  'individualCommissionRate',
+]);
+
+/**
+ * The partner's rule as it was when the customer activated the voucher.
+ * @param {any} snapshot `voucher.ruleSnapshot`
+ * @returns {import('#domain').CommercialRule}
+ */
+function snapshotRule(snapshot) {
+  /** @type {Record<string, string | null>} */
+  const rates = {};
+  for (const field of RULE_RATES) rates[field] = snapshot[field] ? fromDecimal128(snapshot[field]) : null;
+  return /** @type {any} */ ({ relationshipKind: snapshot.relationshipKind, ...rates });
+}
+
+/**
+ * Referral redemption: Net/Net commission from the rule snapshot and the merchant VAT at redemption.
+ * @param {any} voucher
+ * @param {unknown} grossAmount
+ * @param {import('mongodb').ClientSession} tx
+ */
+async function referralAmounts(voucher, grossAmount, tx) {
+  const tenants = await collection('tenants');
+  const tenant = await tenants.findOne({ _id: voucher.tenantId }, { session: tx, projection: { vatRate: 1 } });
+  if (!tenant?.vatRate) throw new HttpError(409, 'VAT_NOT_SET', 'Set the merchant VAT rate before redeeming partner vouchers');
+  try {
+    return calculateRedemption({ grossInvoiceAmount: grossAmount, vatRate: fromDecimal128(tenant.vatRate), rule: snapshotRule(voucher.ruleSnapshot) });
+  } catch (error) {
+    throw moneyToHttp(error);
+  }
 }
 
 /**
@@ -67,7 +105,7 @@ function newCode() {
 }
 
 /** @param {number} count */
-function newCodes(count) {
+export function newCodes(count) {
   const codes = new Set();
   while (codes.size < count) codes.add(newCode());
   return [...codes];
@@ -83,12 +121,14 @@ function escapeRegex(value) {
  * @param {any} voucher
  * @param {Date} now
  * @param {Map<string, string>} [merchantNames]
+ * @param {Map<string, any>} [brands] for the voucher card and share image in the console
  */
-function voucherView(voucher, now, merchantNames) {
+function voucherView(voucher, now, merchantNames, brands) {
   return {
     code: voucher.code,
     merchantId: voucher.tenantId,
     merchantName: merchantNames?.get(voucher.tenantId) ?? null,
+    brand: brands?.get(voucher.tenantId) ?? null,
     source: voucher.source,
     status: effectiveVoucherStatus(voucher.status, voucher.validUntil, now),
     discountType: voucher.discountType,
@@ -116,38 +156,19 @@ function voucherView(voucher, now, merchantNames) {
  * @param {any} voucher
  * @param {string} merchantName
  * @param {Date} now
+ * @param {any} [brand] merchant logo and colour
  */
-function publicView(voucher, merchantName, now) {
+export function publicView(voucher, merchantName, now, brand = null) {
   return {
     code: voucher.code,
     merchantName,
+    brand,
     status: effectiveVoucherStatus(voucher.status, voucher.validUntil, now),
     discountType: voucher.discountType,
     discountValue: fromDecimal128(voucher.discountValue),
     minBillAmount: voucher.minBillAmount ? fromDecimal128(voucher.minBillAmount) : null,
     validUntil: voucher.validUntil.toISOString(),
   };
-}
-
-/** @param {string[]} tenantIds */
-async function merchantNames(tenantIds) {
-  const tenants = await collection('tenants');
-  const rows = await tenants.find({ _id: { $in: [...new Set(tenantIds)] } }, { projection: { name: 1 } }).toArray();
-  return new Map(rows.map((tenant) => [tenant._id, tenant.name]));
-}
-
-/**
- * Platform admin sees every merchant (optionally one); merchant roles only their own.
- * @param {import('../auth/session.js').Session} session
- * @param {string | null} requested
- */
-function scopeFilter(session, requested) {
-  if (session.role === ROLES.PLATFORM_ADMIN) {
-    if (!requested) return {};
-    if (!UUID_PATTERN.test(requested)) throw new HttpError(422, 'VALIDATION', 'merchantId is invalid', { details: { field: 'merchantId' } });
-    return { tenantId: requested.toLowerCase() };
-  }
-  return { tenantId: session.tenantId };
 }
 
 /**
@@ -231,7 +252,8 @@ async function issueVouchers(req, res, ctx) {
         );
       });
       const names = await merchantNames([tenantId]);
-      sendJson(res, 201, { batchId, vouchers: docs.map((doc) => voucherView(doc, now, names)) });
+      const brands = await merchantBrands([tenantId]);
+      sendJson(res, 201, { batchId, vouchers: docs.map((doc) => voucherView(doc, now, names, brands)) });
       return;
     } catch (error) {
       if (/** @type {any} */ (error)?.code !== 11000 || attempt >= 3) throw error;
@@ -285,7 +307,8 @@ async function listVouchers(req, res, ctx) {
   const counts = Object.fromEntries(STATUS_FILTERS.map((key) => [key, 0]));
   for (const row of countRows) counts[row._id] = row.n;
   const names = await merchantNames(rows.map((row) => row.tenantId));
-  sendJson(res, 200, { vouchers: rows.map((row) => voucherView(row, now, names)), counts, limit: LIST_LIMIT });
+  const brands = await merchantBrands(rows.map((row) => row.tenantId));
+  sendJson(res, 200, { vouchers: rows.map((row) => voucherView(row, now, names, brands)), counts, limit: LIST_LIMIT });
 }
 
 /** @type {import('../http/router.js').Handler} */
@@ -333,7 +356,8 @@ async function publicVoucher(req, res, ctx) {
   if (!voucher || !names.has(voucher.tenantId)) throw new HttpError(404, 'VOUCHER_NOT_FOUND', 'Voucher not found');
   const session = await loadSession(req);
   const canRedeem = Boolean(session && can(session.role, 'redemption.create') && session.tenantId === voucher.tenantId);
-  sendJson(res, 200, { voucher: publicView(voucher, /** @type {string} */ (names.get(voucher.tenantId)), new Date()), canRedeem });
+  const brand = (await merchantBrands([voucher.tenantId])).get(voucher.tenantId);
+  sendJson(res, 200, { voucher: publicView(voucher, /** @type {string} */ (names.get(voucher.tenantId)), new Date(), brand), canRedeem });
 }
 
 /**
@@ -382,21 +406,39 @@ async function redeemVoucher(req, res, ctx) {
     const status = effectiveVoucherStatus(voucher.status, voucher.validUntil, now);
     if (status !== 'ACTIVE') throw notRedeemable(status, voucher);
 
+    const redemptionId = randomUUID();
     let amounts;
-    try {
-      amounts = calculateDirectRedemption({
-        discountType: voucher.discountType,
-        discountValue: fromDecimal128(voucher.discountValue),
-        minBillAmount: voucher.minBillAmount ? fromDecimal128(voucher.minBillAmount) : null,
-        grossAmount: body.grossAmount,
-      });
-    } catch (error) {
-      throw moneyToHttp(error);
+    /** @type {Record<string, unknown>} */
+    let extra = {};
+    /** @type {import('#domain').RedemptionAmounts['commissionItems']} */
+    let commissionItems = [];
+    if (voucher.source === 'REFERRAL') {
+      const referral = await referralAmounts(voucher, body.grossAmount, tx);
+      amounts = { grossAmount: referral.grossInvoiceAmount, discountAmount: referral.customerDiscountAmount, payableAmount: referral.discountedGrossPayable };
+      extra = {
+        vatRate: toDecimal128(referral.vatRate),
+        netNetCommissionBase: toDecimal128(referral.netNetCommissionBase),
+        vatAmount: toDecimal128(referral.vatAmount),
+      };
+      commissionItems = referral.commissionItems;
+    } else {
+      try {
+        amounts = calculateDirectRedemption({
+          discountType: voucher.discountType,
+          discountValue: fromDecimal128(voucher.discountValue),
+          minBillAmount: voucher.minBillAmount ? fromDecimal128(voucher.minBillAmount) : null,
+          grossAmount: body.grossAmount,
+        });
+      } catch (error) {
+        throw moneyToHttp(error);
+      }
     }
     const redemption = {
+      id: redemptionId,
       grossAmount: toDecimal128(amounts.grossAmount),
       discountAmount: toDecimal128(amounts.discountAmount),
       payableAmount: toDecimal128(amounts.payableAmount),
+      ...extra,
       redeemedBy: session.userId,
       roleAssignmentId: session.roleAssignmentId,
       redeemedAt: now,
@@ -407,14 +449,103 @@ async function redeemVoucher(req, res, ctx) {
       { session: tx },
     );
     if (result.modifiedCount !== 1) throw notRedeemable('REDEEMED', voucher);
+    if (commissionItems.length) {
+      const items = await collection('commissionItems');
+      await items.insertMany(
+        commissionItems.map((item) => ({
+          _id: randomUUID(),
+          tenantId: voucher.tenantId,
+          voucherId: voucher._id,
+          redemptionId,
+          partnerId: voucher.partnerId,
+          mediumId: voucher.mediumId ?? null,
+          ruleId: voucher.ruleSnapshot.ruleId ?? null,
+          ruleVersion: voucher.ruleSnapshot.version ?? null,
+          obligationType: item.obligationType,
+          rate: toDecimal128(item.rate),
+          baseAmount: toDecimal128(item.baseAmount),
+          amount: toDecimal128(item.amount),
+          status: 'OPEN',
+          redeemedAt: now,
+          createdAt: now,
+          voidedAt: null,
+          voidedBy: null,
+          voidReason: null,
+        })),
+        { session: tx },
+      );
+    }
     await recordAudit(
-      { ...actorOf(ctx), eventType: 'VOUCHER_REDEEMED', entityType: 'voucher', entityId: voucher._id, before: { status: 'ACTIVE' }, after: amounts },
+      {
+        ...actorOf(ctx),
+        eventType: 'VOUCHER_REDEEMED',
+        entityType: 'voucher',
+        entityId: voucher._id,
+        before: { status: 'ACTIVE' },
+        after: { ...amounts, redemptionId, commissionItems },
+      },
       { session: tx },
     );
     return { ...voucher, status: 'REDEEMED', redemption };
   });
 
   sendJson(res, 200, { voucher: voucherView(redeemed, new Date(), await merchantNames([redeemed.tenantId])) });
+}
+
+/**
+ * Undo a redemption entered by mistake (plan J09): the voucher is usable again until its end date and
+ * its commission items are voided. Refused once any item is paid. The voided redemption stays on file.
+ * @type {import('../http/router.js').Handler}
+ */
+async function voidRedemption(req, res, ctx) {
+  const session = sessionOf(ctx);
+  const code = parseVoucherCode(ctx.params.code);
+  if (!code) throw new HttpError(404, 'VOUCHER_NOT_FOUND', 'Voucher not found');
+  const reason = stringField(await readJson(req), 'reason', { max: 300 }).trim();
+  if (!reason) throw new HttpError(422, 'VALIDATION', 'reason is required', { details: { field: 'reason' } });
+
+  const voucher = await withTransaction(async (tx) => {
+    const now = new Date();
+    const vouchers = await collection('vouchers');
+    const found = await vouchers.findOne({ code, tenantId: session.tenantId }, { session: tx });
+    if (!found) throw new HttpError(404, 'VOUCHER_NOT_FOUND', 'Voucher not found');
+    if (found.status !== 'REDEEMED' || !found.redemption) throw new HttpError(409, 'VOUCHER_NOT_REDEEMED', 'This voucher has no redemption to void');
+    const items = await collection('commissionItems');
+    const redemptionId = found.redemption.id ?? null;
+    if (redemptionId && (await items.countDocuments({ redemptionId, status: 'PAID' }, { session: tx, limit: 1 }))) {
+      throw new HttpError(409, 'COMMISSION_PAID', 'The commission of this redemption is already paid');
+    }
+    const status = found.validUntil > now ? 'ACTIVE' : 'EXPIRED';
+    const voided = { ...found.redemption, voidedAt: now, voidedBy: session.userId, voidReason: reason };
+    const result = await vouchers.updateOne(
+      { _id: found._id, status: 'REDEEMED' },
+      { $set: { status, redemption: null }, $push: { voidedRedemptions: voided } },
+      { session: tx },
+    );
+    if (result.modifiedCount !== 1) throw new HttpError(409, 'VOUCHER_NOT_REDEEMED', 'This voucher has no redemption to void');
+    const voidedItems = redemptionId
+      ? await items.updateMany(
+          { redemptionId, status: 'OPEN' },
+          { $set: { status: 'VOID', voidedAt: now, voidedBy: session.userId, voidReason: reason } },
+          { session: tx },
+        )
+      : { modifiedCount: 0 };
+    await recordAudit(
+      {
+        ...actorOf(ctx),
+        eventType: 'REDEMPTION_VOIDED',
+        entityType: 'voucher',
+        entityId: found._id,
+        before: { status: 'REDEEMED', redemptionId },
+        after: { status, commissionItemsVoided: voidedItems.modifiedCount },
+        reason,
+      },
+      { session: tx },
+    );
+    return { ...found, status, redemption: null };
+  });
+
+  sendJson(res, 200, { voucher: voucherView(voucher, new Date(), await merchantNames([voucher.tenantId])) });
 }
 
 /** @type {import('../http/router.js').RouteDef[]} */
@@ -424,5 +555,6 @@ export const voucherRoutes = [
   { method: 'POST', path: '/api/v1/vouchers/:code/void', handler: authed(voidVoucher, { permission: 'voucher.void' }) },
   { method: 'GET', path: '/api/v1/vouchers/:code', handler: authed(counterVoucher, { permission: 'voucher.validate' }) },
   { method: 'POST', path: '/api/v1/vouchers/:code/redeem', handler: authed(redeemVoucher, { permission: 'redemption.create' }) },
+  { method: 'POST', path: '/api/v1/vouchers/:code/void-redemption', handler: authed(voidRedemption, { permission: 'redemption.void' }) },
   { method: 'GET', path: '/api/v1/public/vouchers/:code', handler: publicVoucher },
 ];

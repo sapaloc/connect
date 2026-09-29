@@ -2,8 +2,11 @@ import { esc } from '../dom.js';
 import { getLang, t } from '../i18n.js';
 import { icon, navItem, visibleNav } from '../nav.js';
 import { getTheme } from '../theme.js';
+import { brandPanel, mountBrand } from './brand.js';
 import { counterPanel, mountCounter } from './counter.js';
 import { merchantsPanel, mountMerchants } from './merchants.js';
+import { mountMy, myPanel } from './my.js';
+import { mountPartners, partnersPanel } from './partners.js';
 import { mountTeam, teamPanel } from './team.js';
 import { mountVouchers, vouchersPanel } from './vouchers.js';
 
@@ -66,8 +69,8 @@ export function appLayout(app, current, { title, content }) {
       <a class="skip-link" href="#main">${esc(t('skipToContent'))}</a>
       <aside class="sb" id="sidebar" aria-label="${esc(t('menu'))}">
         <div class="sb-head">
-          <span class="brand brand-on-dark">MYCONNECT</span>
-          <span class="brand-mark" aria-hidden="true">M</span>
+          <span class="brand brand-on-dark">SAPAWOO</span>
+          <span class="brand-mark" aria-hidden="true">S</span>
           <button type="button" class="icon-btn sb-close" data-drawer="close" aria-label="${esc(t('closeMenu'))}">${icon('close')}</button>
         </div>
         <nav class="sb-nav">${sideNav}</nav>
@@ -191,6 +194,18 @@ export function vouchersView(app) {
 }
 
 /** @param {App} app */
+export function partnersView(app) {
+  render(app, '/console/partners', partnersPanel(app));
+  mountPartners(app);
+}
+
+/** @param {App} app */
+export function brandView(app) {
+  render(app, '/console/brand', brandPanel());
+  mountBrand(app);
+}
+
+/** @param {App} app */
 export function counterView(app) {
   render(app, '/counter', counterPanel());
   mountCounter(app);
@@ -198,5 +213,6 @@ export function counterView(app) {
 
 /** @param {App} app */
 export function myView(app) {
-  render(app, '/my', `<section class="card-sw">${emptyState(t('myTitle'), t('myEmpty'), 'qr')}</section>`);
+  render(app, '/my', myPanel());
+  mountMy(app);
 }
