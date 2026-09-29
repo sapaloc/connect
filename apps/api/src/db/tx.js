@@ -1,21 +1,18 @@
-import { getPool } from './pool.js';
+import { getClient } from './mongo.js';
 
 /**
+ * Runs `work` in a transaction (needs a replica set: Atlas, or local Docker with --replSet).
+ * Pass `{ session }` to every read and write inside. The driver retries `work` on transient
+ * write conflicts, so it must not have side effects outside the database.
  * @template T
- * @param {(client: import('pg').PoolClient) => Promise<T>} work
+ * @param {(session: import('mongodb').ClientSession) => Promise<T>} work
  * @returns {Promise<T>}
  */
 export async function withTransaction(work) {
-  const client = await getPool().connect();
+  const session = (await getClient()).startSession();
   try {
-    await client.query('BEGIN');
-    const result = await work(client);
-    await client.query('COMMIT');
-    return result;
-  } catch (error) {
-    await client.query('ROLLBACK').catch(() => {});
-    throw error;
+    return await session.withTransaction(() => work(session));
   } finally {
-    client.release();
+    await session.endSession();
   }
 }

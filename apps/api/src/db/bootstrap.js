@@ -1,48 +1,89 @@
+import { ROLES } from '#domain';
+import { randomUUID } from 'node:crypto';
 import { hashPassword } from '../auth/password.js';
+import { collection } from './mongo.js';
 
-/** @typedef {import('pg').PoolClient | import('pg').Client} Db */
+/** @typedef {{ session?: import('mongodb').ClientSession }} TxOptions */
+
+/**
+ * A role assignment embedded in `users.roles`.
+ * @param {{ role: string, tenantId: string | null, createdBy?: string | null }} input
+ */
+export function newRoleAssignment({ role, tenantId, createdBy = null }) {
+  const now = new Date();
+  return {
+    _id: randomUUID(),
+    role,
+    scopeType: role === ROLES.PLATFORM_ADMIN ? 'PLATFORM' : 'TENANT',
+    tenantId,
+    partnerRelationshipId: null,
+    affiliatedReferrerId: null,
+    status: 'ACTIVE',
+    validFrom: now,
+    validUntil: null,
+    createdAt: now,
+    createdBy,
+  };
+}
+
+/**
+ * Adds the role unless the user already holds it, active, in the same tenant.
+ * @param {string} userId
+ * @param {{ role: string, tenantId: string | null, createdBy?: string | null }} input
+ * @param {TxOptions} [options]
+ */
+export async function grantRole(userId, input, options = {}) {
+  const users = await collection('users');
+  await users.updateOne(
+    { _id: userId, roles: { $not: { $elemMatch: { role: input.role, tenantId: input.tenantId, status: 'ACTIVE' } } } },
+    { $push: { roles: newRoleAssignment(input) }, $set: { updatedAt: new Date() } },
+    options,
+  );
+}
 
 /**
  * Finds a tenant by name, creating it with its operating organization if missing.
- * @param {Db} db
  * @param {string} name
+ * @param {TxOptions} [options]
  */
-export async function ensureTenant(db, name) {
-  const found = await db.query('SELECT tenant_id FROM tenant WHERE name = $1', [name]);
-  if (found.rows[0]) return /** @type {string} */ (found.rows[0].tenant_id);
-  const party = await db.query(`INSERT INTO party (party_kind) VALUES ('ORGANIZATION') RETURNING party_id`);
-  const partyId = party.rows[0].party_id;
-  await db.query('INSERT INTO organization (party_id, legal_name, display_name) VALUES ($1, $2, $2)', [partyId, name]);
-  const tenant = await db.query(
-    'INSERT INTO tenant (operating_organization_id, name) VALUES ($1, $2) RETURNING tenant_id',
-    [partyId, name],
+export async function ensureTenant(name, options = {}) {
+  const tenants = await collection('tenants');
+  const found = await tenants.findOne({ name }, { ...options, projection: { _id: 1 } });
+  if (found) return /** @type {string} */ (found._id);
+  const tenantId = randomUUID();
+  await tenants.insertOne(
+    {
+      _id: tenantId,
+      name,
+      status: 'ACTIVE',
+      timezone: 'Asia/Ho_Chi_Minh',
+      currency: 'VND',
+      internalLanguages: ['en', 'vi'],
+      organization: { partyId: randomUUID(), legalName: name, displayName: name, organizationReference: null },
+      createdAt: new Date(),
+    },
+    options,
   );
-  return /** @type {string} */ (tenant.rows[0].tenant_id);
+  return tenantId;
 }
 
 /**
  * Creates an ACTIVE account (or updates its password) and grants the role if missing.
- * @param {Db} db
  * @param {{ email: string, displayName: string, password: string, role: string, tenantId: string | null }} input
+ * @param {TxOptions} [options]
  */
-export async function ensureActiveUser(db, { email, displayName, password, role, tenantId }) {
-  const passwordHash = await hashPassword(password);
-  const user = await db.query(
-    `INSERT INTO user_account (email_or_login, display_name, account_status, password_hash, password_changed_at)
-     VALUES ($1, $2, 'ACTIVE', $3, now())
-     ON CONFLICT (email_or_login) DO UPDATE
-       SET password_hash = EXCLUDED.password_hash, password_changed_at = now(),
-           account_status = 'ACTIVE', updated_at = now()
-     RETURNING user_id`,
-    [email.toLowerCase(), displayName, passwordHash],
+export async function ensureActiveUser({ email, displayName, password, role, tenantId }, options = {}) {
+  const users = await collection('users');
+  const now = new Date();
+  const user = await users.findOneAndUpdate(
+    { email: email.toLowerCase() },
+    {
+      $set: { passwordHash: await hashPassword(password), passwordChangedAt: now, status: 'ACTIVE', updatedAt: now },
+      $setOnInsert: { _id: randomUUID(), displayName, preferredLanguage: 'en', roles: [], createdAt: now },
+    },
+    { ...options, upsert: true, returnDocument: 'after', projection: { _id: 1 } },
   );
-  const userId = user.rows[0].user_id;
-  await db.query(
-    `INSERT INTO role_assignment (user_id, role, scope_type, tenant_id)
-     SELECT $1, $2, $3, $4
-      WHERE NOT EXISTS (SELECT 1 FROM role_assignment WHERE user_id = $1 AND role = $2
-                          AND tenant_id IS NOT DISTINCT FROM $4 AND status = 'ACTIVE')`,
-    [userId, role, tenantId ? 'TENANT' : 'PLATFORM', tenantId],
-  );
-  return /** @type {string} */ (userId);
+  const userId = /** @type {string} */ (user?._id);
+  await grantRole(userId, { role, tenantId }, options);
+  return userId;
 }

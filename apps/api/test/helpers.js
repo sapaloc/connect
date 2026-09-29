@@ -1,30 +1,19 @@
 import { passwordPolicyErrors } from '#domain';
 import http from 'node:http';
-import pg from 'pg';
 import { env } from '../src/config/env.js';
-import { connectionConfig } from '../src/db/connection.js';
-import { getPool } from '../src/db/pool.js';
-import { resetSchema } from '../src/db/reset.js';
+import { closeClient } from '../src/db/mongo.js';
+import { resetDatabase as dropAndSetup } from '../src/db/reset.js';
 import { seed } from '../src/db/seed-local.js';
 import { handle } from '../src/http/app.js';
 
 export const PASSWORD = env.seedPassword;
 
-/** Drops the test schema, migrates and seeds. Refuses to run outside APP_ENV=test. */
+/** Drops the test database, runs db:setup and seeds. Refuses to run outside APP_ENV=test. */
 export async function resetDatabase() {
   if (env.appEnv !== 'test') throw new Error('Integration tests need APP_ENV=test (see .env.test)');
   if (passwordPolicyErrors(PASSWORD).length) throw new Error('SEED_PASSWORD in .env.test does not meet the password policy');
-  await resetSchema(env.databaseMigrationUrl);
-  const client = new pg.Client(connectionConfig(env.databaseMigrationUrl));
-  await client.connect();
-  try {
-    await client.query('BEGIN');
-    const tenantId = await seed(client, PASSWORD);
-    await client.query('COMMIT');
-    return tenantId;
-  } finally {
-    await client.end();
-  }
+  await dropAndSetup();
+  return seed(PASSWORD);
 }
 
 export async function startServer() {
@@ -35,7 +24,7 @@ export async function startServer() {
     baseUrl: `http://127.0.0.1:${address.port}`,
     async close() {
       await new Promise((resolve) => server.close(() => resolve(undefined)));
-      await getPool().end();
+      await closeClient();
     },
   };
 }
