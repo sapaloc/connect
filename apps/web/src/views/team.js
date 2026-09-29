@@ -2,7 +2,7 @@ import { INVITABLE_ROLES } from '#domain';
 import { api } from '../api.js';
 import { $, busy, esc, formValues } from '../dom.js';
 import { errorText, formatDateTime, getLang, t } from '../i18n.js';
-import { messageSlot, showMessage } from './common.js';
+import { messageSlot, showLink, showMessage } from './common.js';
 
 /** @typedef {import('../main.js').App} App */
 /** @typedef {{ id: string, email: string, displayName: string, status: string, roles: string[], invitationOpen: boolean }} TeamUser */
@@ -12,7 +12,7 @@ export function teamPanel(profile) {
   const roles = INVITABLE_ROLES[/** @type {keyof typeof INVITABLE_ROLES} */ (profile.activeRole?.role)] ?? [];
   return `
     <section class="card-sw">
-      <h2 class="card-title">${esc(t('inviteTitle'))}</h2>
+      <h2 class="card-title">${esc(t('teamInviteTitle'))}</h2>
       <p class="text-muted small mb-3">${esc(t('teamSubtitle'))}</p>
       <form id="invite" class="row g-3 align-items-end" novalidate>
         <div class="col-12 col-md-6 col-xl-4">
@@ -59,27 +59,6 @@ export function teamPanel(profile) {
         </table>
       </div>
     </section>`;
-}
-
-/**
- * Shows a one-time link with a copy button. The link is never stored by the web app.
- * @param {string} message
- * @param {string} url
- */
-function showLink(message, url) {
-  const box = $('#link-box');
-  box.hidden = false;
-  box.innerHTML = `
-    <p class="small mb-2">${esc(message)}</p>
-    <div class="input-group">
-      <input class="form-control" readonly value="${esc(url)}" aria-label="Link" />
-      <button type="button" class="btn btn-outline-secondary" data-copy>${esc(t('copy'))}</button>
-    </div>`;
-  const button = /** @type {HTMLButtonElement} */ ($('[data-copy]', box));
-  button.addEventListener('click', async () => {
-    await navigator.clipboard.writeText(url);
-    button.textContent = t('copied');
-  });
 }
 
 /** @param {App} app */

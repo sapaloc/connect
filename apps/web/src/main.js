@@ -6,7 +6,7 @@ import { canOpen, navItem } from './nav.js';
 import { applyTheme, toggleTheme } from './theme.js';
 import { forgotView, inviteView, loginView, resetView, selectRoleView } from './views/auth.js';
 import { showMessage } from './views/common.js';
-import { consoleView, counterView, myView, teamView } from './views/shell.js';
+import { consoleView, counterView, merchantsView, myView, teamView } from './views/shell.js';
 
 /**
  * @typedef {{
@@ -24,7 +24,13 @@ const PUBLIC_ROUTES = { '/login': loginView, '/forgot': forgotView, '/invite': i
 
 /** Signed-in pages; who may open each one is declared in nav.js. */
 /** @type {Record<string, (app: App) => void>} */
-const PAGE_ROUTES = { '/console': consoleView, '/console/team': teamView, '/counter': counterView, '/my': myView };
+const PAGE_ROUTES = {
+  '/console': consoleView,
+  '/console/merchants': merchantsView,
+  '/console/team': teamView,
+  '/counter': counterView,
+  '/my': myView,
+};
 
 /** @type {{ text: string, tone: 'error' | 'success' | 'info' } | null} */
 let pendingFlash = null;
@@ -73,7 +79,7 @@ function route() {
     return app.navigate(/** @type {string} */ (profile.landing), { replace: true });
   }
   view(app);
-  document.title = `${t(item.label)} · Connect`;
+  document.title = `${t(item.label)} · MyConnect`;
 }
 
 /** @param {boolean} open */

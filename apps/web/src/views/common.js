@@ -26,7 +26,7 @@ export function authLayout({ title, subtitle = '', body }) {
     <main class="auth-shell">
       <section class="auth-card">
         <header class="d-flex justify-content-between align-items-center mb-4">
-          <span class="brand">CONNECT</span>
+          <span class="brand">MYCONNECT</span>
           ${langToggle()}
         </header>
         <h1 class="h4 mb-1">${esc(title)}</h1>
@@ -52,6 +52,28 @@ export function showMessage(text, tone = 'error', id = 'form-message') {
   if (!slot) return;
   slot.textContent = text;
   slot.dataset.tone = tone;
+}
+
+/**
+ * Shows a one-time link with a copy button. The link is never stored by the web app.
+ * @param {string} message
+ * @param {string} url
+ * @param {string} [boxId]
+ */
+export function showLink(message, url, boxId = 'link-box') {
+  const box = $(`#${boxId}`);
+  box.hidden = false;
+  box.innerHTML = `
+    <p class="small mb-2">${esc(message)}</p>
+    <div class="input-group">
+      <input class="form-control" readonly value="${esc(url)}" aria-label="Link" />
+      <button type="button" class="btn btn-outline-secondary" data-copy>${esc(t('copy'))}</button>
+    </div>`;
+  const button = /** @type {HTMLButtonElement} */ ($('[data-copy]', box));
+  button.addEventListener('click', async () => {
+    await navigator.clipboard.writeText(url);
+    button.textContent = t('copied');
+  });
 }
 
 /** Password + repeat fields with a live checklist of the policy (§8.2). */

@@ -10,6 +10,7 @@ export const PERMISSIONS = Object.freeze({
   'surface.console': Object.freeze([PLATFORM_ADMIN, TENANT_ADMIN, MANAGER]),
   'surface.counter': Object.freeze([MANAGER, STAFF]),
   'surface.my': Object.freeze([PARTNER_ADMIN, REFERRER]),
+  'merchant.manage': Object.freeze([PLATFORM_ADMIN]),
   'user.list': Object.freeze([PLATFORM_ADMIN, TENANT_ADMIN]),
   'user.invite': Object.freeze([PLATFORM_ADMIN, TENANT_ADMIN]),
   'user.reset_link': Object.freeze([PLATFORM_ADMIN, TENANT_ADMIN]),

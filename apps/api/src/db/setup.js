@@ -1,3 +1,4 @@
+import { merchantSlug } from '#domain';
 import { pathToFileURL } from 'node:url';
 import { env, requireEnv } from '../config/env.js';
 import { closeClient, COLLECTIONS, getDb } from './mongo.js';
@@ -6,7 +7,7 @@ import { closeClient, COLLECTIONS, getDb } from './mongo.js';
  * Bump when a validator or index changes. Changes must keep old documents valid
  * (add optional fields; backfill in a script before making a field required).
  */
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 const DAY_SECONDS = 24 * 60 * 60;
 const uuid = { bsonType: 'string', pattern: '^[0-9a-f-]{36}$' };
@@ -89,7 +90,12 @@ const DEFINITIONS = {
         createdAt: date,
       },
     },
-    indexes: [{ key: { name: 1 }, name: 'name_uq', unique: true }],
+    // slug, contactEmail, contactPhone, address are optional and not in the validator: changing an
+    // existing validator needs collMod, which the UAT database user may not run.
+    indexes: [
+      { key: { name: 1 }, name: 'name_uq', unique: true },
+      { key: { slug: 1 }, name: 'slug_uq', unique: true, partialFilterExpression: { slug: { $type: 'string' } } },
+    ],
   },
 
   [COLLECTIONS.users]: {
@@ -208,6 +214,20 @@ const DEFINITIONS = {
 };
 
 /**
+ * Fills fields added after documents were created. Idempotent.
+ * @param {import('mongodb').Db} db
+ */
+async function backfill(db) {
+  const tenants = db.collection(COLLECTIONS.tenants);
+  for (const tenant of await tenants.find({ slug: { $exists: false } }, { projection: { name: 1 } }).toArray()) {
+    const base = merchantSlug(tenant.name) || 'merchant';
+    let slug = base;
+    for (let n = 2; await tenants.countDocuments({ slug }, { limit: 1 }); n++) slug = `${base}-${n}`;
+    await tenants.updateOne({ _id: tenant._id, slug: { $exists: false } }, { $set: { slug } });
+  }
+}
+
+/**
  * Creates missing collections, applies validators and indexes. Safe to run on every deploy.
  * @param {import('mongodb').Db} db
  */
@@ -230,6 +250,7 @@ export async function setup(db) {
     }
     if (indexes.length) await db.collection(name).createIndexes(indexes);
   }
+  await backfill(db);
   await db
     .collection(COLLECTIONS.schemaVersions)
     .updateOne({ _id: SCHEMA_VERSION }, { $setOnInsert: { appliedAt: new Date() } }, { upsert: true });
