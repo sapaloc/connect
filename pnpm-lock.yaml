@@ -11,6 +11,9 @@ importers:
       bootstrap:
         specifier: ^5.3.3
         version: 5.3.8(@popperjs/core@2.11.8)
+      decimal.js:
+        specifier: ^10.6.0
+        version: 10.6.0
       mongodb:
         specifier: ^7.6.0
         version: 7.6.0
@@ -346,6 +349,9 @@ packages:
     resolution: {integrity: sha512-oz3LwE3qGEhTCSyhzQRLY3Bj1NLOsjFMf6tcmY5J8M+3R7EVcmoBfSHWvjUK3yXCLDUsGpIuB3aQL4nDZ1EV/g==}
     engines: {node: '>=20.19.0'}
 
+  decimal.js@10.6.0:
+    resolution: {integrity: sha512-YpgQiITW3JXGntzdUmyUR1V812Hn8T1YVXhCu+wO3OpS4eU9l4YdD3qjyiKdV6mvV29zapkMeD390UVEf2lkUg==}
+
   esbuild@0.25.12:
     resolution: {integrity: sha512-bbPBYYrtZbkt6Os6FiTLCTFxvq4tt3JKall1vRwshA3fdVztsLAatFaZobhkBC8/BrPetoa0oksYoKXoG4ryJg==}
     engines: {node: '>=18'}
@@ -664,6 +670,8 @@ snapshots:
       '@popperjs/core': 2.11.8
 
   bson@7.3.3: {}
+
+  decimal.js@10.6.0: {}
 
   esbuild@0.25.12:
     optionalDependencies:

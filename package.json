@@ -22,11 +22,13 @@
     "db:restore": "node --env-file-if-exists=.env apps/api/src/db/db-restore.js",
     "user:create": "node --env-file-if-exists=.env apps/api/src/db/create-user.js",
     "test": "node --env-file-if-exists=.env.test --test --test-concurrency=1 'packages/domain/test/**/*.test.js' 'apps/api/test/**/*.test.js'",
-    "test:permission": "node --env-file-if-exists=.env.test --test --test-concurrency=1 --test-name-pattern=@permission 'packages/domain/test/**/*.test.js' 'apps/api/test/**/*.test.js'",
+    "test:permission": "node --env-file-if-exists=.env.test --test --test-concurrency=1 --test-force-exit --test-name-pattern=@permission 'packages/domain/test/**/*.test.js' 'apps/api/test/**/*.test.js'",
+    "test:money": "node --env-file-if-exists=.env.test --test --test-concurrency=1 --test-force-exit --test-name-pattern=@money 'packages/domain/test/**/*.test.js' 'apps/api/test/**/*.test.js'",
     "check:syntax": "git ls-files '*.js' '*.mjs' | xargs -n1 node --check"
   },
   "dependencies": {
     "bootstrap": "^5.3.3",
+    "decimal.js": "^10.6.0",
     "mongodb": "^7.6.0"
   },
   "devDependencies": {
