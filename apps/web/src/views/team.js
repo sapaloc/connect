@@ -1,4 +1,4 @@
-import { INVITABLE_ROLES } from '@connect/domain';
+import { INVITABLE_ROLES } from '#domain';
 import { api } from '../api.js';
 import { $, busy, esc, formValues } from '../dom.js';
 import { errorText, formatDateTime, getLang, t } from '../i18n.js';

@@ -1,6 +1,6 @@
 import 'bootstrap/dist/css/bootstrap.min.css';
 import './styles.css';
-import { surfaceOf } from '@connect/domain';
+import { surfaceOf } from '#domain';
 import { api, fetchProfile, SESSION_ENDED } from './api.js';
 import { errorText, getLang, setLang, t } from './i18n.js';
 import { forgotView, inviteView, loginView, resetView, selectRoleView } from './views/auth.js';

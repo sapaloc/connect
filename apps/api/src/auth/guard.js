@@ -1,4 +1,4 @@
-import { can } from '@connect/domain';
+import { can } from '#domain';
 import { getPool } from '../db/pool.js';
 import { HttpError } from '../http/errors.js';
 import { clearSessionCookie, loadSession } from './session.js';

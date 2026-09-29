@@ -1,4 +1,4 @@
-import { passwordPolicyErrors } from '@connect/domain';
+import { passwordPolicyErrors } from '#domain';
 import http from 'node:http';
 import pg from 'pg';
 import { env } from '../src/config/env.js';

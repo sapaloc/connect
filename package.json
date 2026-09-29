@@ -6,17 +6,27 @@
   "engines": {
     "node": "22.x"
   },
+  "imports": {
+    "#domain": "./packages/domain/src/index.js"
+  },
   "scripts": {
-    "dev": "pnpm --parallel --filter @connect/api --filter @connect/web dev",
-    "build": "pnpm --filter @connect/web build",
-    "migrate": "pnpm --filter @connect/api migrate",
-    "seed": "pnpm --filter @connect/api seed",
-    "user:create": "pnpm --filter @connect/api user:create",
-    "test": "pnpm -r --workspace-concurrency=1 test",
-    "test:permission": "pnpm -r --workspace-concurrency=1 test --test-name-pattern=@permission",
+    "dev": "pnpm run --parallel \"/^dev:/\"",
+    "dev:api": "node --watch --env-file-if-exists=.env apps/api/server.js",
+    "dev:web": "vite apps/web",
+    "start": "node apps/api/server.js",
+    "build": "vite build apps/web",
+    "migrate": "node --env-file-if-exists=.env apps/api/src/db/migrate.js",
+    "seed": "node --env-file-if-exists=.env apps/api/src/db/seed-local.js",
+    "user:create": "node --env-file-if-exists=.env apps/api/src/db/create-user.js",
+    "test": "node --env-file-if-exists=.env.test --test --test-concurrency=1 'packages/domain/test/**/*.test.js' 'apps/api/test/**/*.test.js'",
+    "test:permission": "node --env-file-if-exists=.env.test --test --test-concurrency=1 --test-name-pattern=@permission 'packages/domain/test/**/*.test.js' 'apps/api/test/**/*.test.js'",
     "check:syntax": "git ls-files '*.js' '*.mjs' | xargs -n1 node --check"
   },
   "dependencies": {
-    "@connect/domain": "workspace:*"
+    "bootstrap": "^5.3.3",
+    "pg": "^8.13.1"
+  },
+  "devDependencies": {
+    "vite": "^6.0.0"
   }
 }

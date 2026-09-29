@@ -1,4 +1,4 @@
-import { ROLES } from '@connect/domain';
+import { ROLES } from '#domain';
 
 // Plan §8: proposed values, pending Security sign-off. Change them here only.
 
