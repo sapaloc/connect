@@ -1,6 +1,5 @@
 import { authRoutes } from '../foundation/auth-routes.js';
 import { health } from '../foundation/health.js';
-import { jobRoutes } from '../foundation/job-routes.js';
 import { userRoutes } from '../foundation/user-routes.js';
 
 /**
@@ -14,7 +13,6 @@ const definitions = [
   { method: 'GET', path: '/api/v1/health', handler: health },
   ...authRoutes,
   ...userRoutes,
-  ...jobRoutes,
 ];
 
 const routes = definitions.map(({ method, path, handler }) => {
