@@ -59,8 +59,8 @@ describe('@permission merchants (MER-01)', () => {
     assert.equal(res.status, 200);
     const byName = Object.fromEntries(res.body.merchants.map((/** @type {any} */ m) => [m.name, m]));
     assert.equal(byName.Number160.slug, 'number160');
-    assert.equal(byName.Number160.admins, 2);
-    assert.equal(byName.Number160.members, 4);
+    assert.equal(byName.Number160.admins, 1);
+    assert.equal(byName.Number160.members, 3);
     assert.equal(byName['Phở Sài Gòn'].admins, 1);
   });
 

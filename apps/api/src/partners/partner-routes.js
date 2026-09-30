@@ -30,6 +30,18 @@ function optionalText(body, key, max) {
 }
 
 /**
+ * Contact person of a partner; every field is optional.
+ * @param {Record<string, unknown>} body
+ */
+export function parseContact(body) {
+  const contactEmail = optionalText(body, 'contactEmail', 254)?.toLowerCase() ?? null;
+  if (contactEmail && !EMAIL_PATTERN.test(contactEmail)) {
+    throw new HttpError(422, 'VALIDATION', 'contactEmail is invalid', { details: { field: 'contactEmail' } });
+  }
+  return { contactName: optionalText(body, 'contactName', 120), contactPhone: optionalText(body, 'contactPhone', 32), contactEmail };
+}
+
+/**
  * Fixed amounts of a stored rule; null on a percent rule created before phase 1.
  * @param {any} rule stored commercial rule version
  */
@@ -193,10 +205,7 @@ async function createPartner(req, res, ctx) {
   }
   const partnerType = stringField(body, 'partnerType', { max: 32 });
   if (!PARTNER_TYPES.includes(partnerType)) throw new HttpError(422, 'VALIDATION', 'partnerType is invalid', { details: { field: 'partnerType' } });
-  const contactEmail = optionalText(body, 'contactEmail', 254)?.toLowerCase() ?? null;
-  if (contactEmail && !EMAIL_PATTERN.test(contactEmail)) {
-    throw new HttpError(422, 'VALIDATION', 'contactEmail is invalid', { details: { field: 'contactEmail' } });
-  }
+  const contact = parseContact(body);
   const rule = parseRule(relationshipKind, body.rule);
   const accountBody = body.account && typeof body.account === 'object' ? /** @type {Record<string, unknown>} */ (body.account) : null;
   const account = accountBody ? parsePerson(accountBody) : null;
@@ -210,9 +219,7 @@ async function createPartner(req, res, ctx) {
     relationshipKind,
     partnerType,
     status: 'ACTIVE',
-    contactName: optionalText(body, 'contactName', 120),
-    contactPhone: optionalText(body, 'contactPhone', 32),
-    contactEmail,
+    ...contact,
     note: optionalText(body, 'note', 500),
     createdBy: session.userId,
     createdAt: now,

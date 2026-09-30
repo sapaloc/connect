@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
 import { collection } from '../src/db/mongo.js';
-import { SEED_PARTNERS, seedPartners } from '../src/db/seed-local.js';
+import { SEED_PARTNERS, SEED_SECOND_MERCHANT, seedPartners } from '../src/db/seed-local.js';
 import { Agent, PASSWORD, resetDatabase, startServer } from './helpers.js';
 
 /** @type {Awaited<ReturnType<typeof startServer>>} */
@@ -19,13 +19,20 @@ after(async () => {
 describe('seed partner accounts', () => {
   it('adds one partner per kind with its account, fixed-amount rule and QR, and no VAT', async () => {
     const created = await seedPartners(PASSWORD);
-    assert.deepEqual(created, SEED_PARTNERS.map((sample) => sample.account.email));
+    assert.deepEqual(created, [
+      `${SEED_SECOND_MERCHANT.admin.email} (${SEED_SECOND_MERCHANT.name})`,
+      ...SEED_PARTNERS.map((sample) => `${sample.account.email} (${sample.merchant})`),
+    ]);
+    assert.equal(await (await collection('users')).countDocuments({ email: 'multi@number160.local' }), 0);
 
     const tenant = await (await collection('tenants')).findOne({ name: 'Number160' });
     assert.equal(tenant?.vatRate, undefined);
 
     const partnerAdmin = new Agent(server.baseUrl);
-    assert.equal((await partnerAdmin.login('partner@number160.local')).status, 200);
+    const login = await partnerAdmin.login('partner@number160.local');
+    assert.equal(login.status, 200);
+    const spa = login.body.roles.find((/** @type {any} */ r) => r.tenantName === 'Number160');
+    await partnerAdmin.post('/api/v1/auth/select-role', { roleAssignmentId: spa.roleAssignmentId });
     const mine = await partnerAdmin.get('/api/v1/my/partner');
     assert.equal(mine.status, 200);
     assert.equal(mine.body.partner.name, 'Khách sạn Demo');
@@ -48,10 +55,36 @@ describe('seed partner accounts', () => {
     assert.deepEqual(await seedPartners('Another-Passw0rd!'), []);
 
     const partners = await collection('partners');
-    assert.equal(await partners.countDocuments({ nameKey: { $in: ['khách sạn demo', 'hướng dẫn viên demo'] } }), 2);
-    assert.equal(await (await collection('commercialRules')).countDocuments({ partnerId: { $in: (await partners.find().toArray()).map((p) => p._id) } }), 2);
+    assert.equal(await partners.countDocuments({ nameKey: { $in: ['khách sạn demo', 'hướng dẫn viên demo'] } }), 3);
+    assert.equal(await (await collection('commercialRules')).countDocuments({ partnerId: { $in: (await partners.find().toArray()).map((p) => p._id) } }), 3);
     const after = await users.findOne({ email: 'partner@number160.local' });
     assert.equal(after?.passwordHash, before?.passwordHash);
-    assert.equal(after?.roles.length, 1);
+    assert.equal(after?.roles.length, 2);
+  });
+});
+
+describe('partner edits its own contact', () => {
+  it('saves name, phone and email; the merchant sees them; others cannot', async () => {
+    const referrer = new Agent(server.baseUrl);
+    await referrer.login('referrer@number160.local');
+    const bad = await referrer.post('/api/v1/my/partner/contact', { contactEmail: 'not-an-email' });
+    assert.equal(bad.status, 422);
+    const saved = await referrer.post('/api/v1/my/partner/contact', {
+      contactName: ' Minh Chau ',
+      contactPhone: '0912 345 678',
+      contactEmail: 'Minh@Example.com',
+    });
+    assert.equal(saved.status, 200);
+    assert.deepEqual(saved.body.contact, { contactName: 'Minh Chau', contactPhone: '0912 345 678', contactEmail: 'minh@example.com' });
+    assert.equal((await referrer.get('/api/v1/my/partner')).body.partner.contactPhone, '0912 345 678');
+
+    const admin = new Agent(server.baseUrl);
+    await admin.login('admin@number160.local');
+    const listed = (await admin.get('/api/v1/partners')).body.partners.find((/** @type {any} */ p) => p.name === 'Hướng dẫn viên Demo');
+    assert.equal(listed.contactEmail, 'minh@example.com');
+    assert.equal((await admin.post('/api/v1/my/partner/contact', { contactName: 'X' })).status, 403);
+
+    const audit = await (await collection('auditEvents')).findOne({ eventType: 'PARTNER_CONTACT_UPDATED' });
+    assert.equal(audit?.after.contactName, 'Minh Chau');
   });
 });
