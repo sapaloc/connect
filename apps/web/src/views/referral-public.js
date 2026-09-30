@@ -1,7 +1,8 @@
-import { parseReferralToken, ratePercent } from '#domain';
+import { parseReferralToken } from '#domain';
 import { api } from '../api.js';
 import { esc } from '../dom.js';
 import { errorText, t } from '../i18n.js';
+import { discountText, ruleDiscount } from '../voucher-ui.js';
 import { cardHead } from './voucher-card.js';
 import { publicLayout } from './voucher-public.js';
 
@@ -29,6 +30,7 @@ export async function referralPublicView(app, rawToken) {
     const path = `/api/v1/public/referrals/${encodeURIComponent(token)}`;
     const { referral, voucher } = await api('GET', path);
     if (voucher) return app.navigate(`/v/${voucher.code}`, { replace: true });
+    const discount = ruleDiscount({ customerDiscountAmount: referral.discountAmount, customerDiscountRate: referral.discountRate });
     page.className = '';
     page.innerHTML = `
       <article class="vcard">
@@ -39,7 +41,7 @@ export async function referralPublicView(app, rawToken) {
           brand: referral.brand,
         })}
         <div class="vcard-body">
-          <p class="vcard-discount">${esc(t('percentOff', { value: ratePercent(referral.discountRate) }))}</p>
+          ${discount ? `<p class="vcard-discount">${esc(discountText(discount))}</p>` : ''}
           <p class="vcard-terms">${esc(t('referralTerms', { days: referral.validityDays }))}</p>
           <p class="vcard-note mb-0">${esc(t('referralNoSignup'))}</p>
         </div>

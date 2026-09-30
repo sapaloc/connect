@@ -2,9 +2,9 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
   commercialRuleFromPercents,
-  MoneyError,
+  fixedRuleFromAmounts,
+  isFixedRule,
   parseReferralToken,
-  parseVatPercent,
   parseVoucherCode,
   partnerAccountRole,
   partnerMediumType,
@@ -94,17 +94,30 @@ describe('@money commercial rule from typed percents', () => {
   });
 });
 
-describe('@money VAT percent', () => {
-  it('is stored as a 4-decimal rate', () => {
-    assert.equal(parseVatPercent('8'), '0.0800');
-    assert.equal(parseVatPercent('10'), '0.1000');
-    assert.equal(parseVatPercent('0'), '0.0000');
+describe('@money fixed-amount rule', () => {
+  it('stores whole VND amounts with 4 decimals', () => {
+    const { rule, errors } = fixedRuleFromAmounts({ relationshipKind: 'COMPANY', customerDiscountAmount: '100000', commissionAmount: 150000 });
+    assert.deepEqual(errors, []);
+    assert.deepEqual(rule, {
+      relationshipKind: 'COMPANY',
+      pricingModel: 'FIXED_AMOUNT',
+      customerDiscountAmount: '100000.0000',
+      commissionAmount: '150000.0000',
+    });
+    assert.equal(isFixedRule(rule), true);
+    assert.equal(isFixedRule({ relationshipKind: 'COMPANY' }), false);
   });
 
-  it('refuses 100% and more than 2 decimals', () => {
-    assert.throws(() => parseVatPercent('100'), MoneyError);
-    assert.throws(() => parseVatPercent('8.125'), MoneyError);
-    assert.throws(() => parseVatPercent('abc'), MoneyError);
+  it('refuses zero, fractions, amounts above the cap and unknown kinds', () => {
+    const errorsOf = (/** @type {Record<string, unknown>} */ input) =>
+      fixedRuleFromAmounts(/** @type {any} */ ({ relationshipKind: 'INDEPENDENT_INDIVIDUAL', ...input })).errors;
+    assert.deepEqual(errorsOf({ customerDiscountAmount: '0', commissionAmount: '1000.5' }), [
+      'CUSTOMER_DISCOUNT_AMOUNT_INVALID',
+      'COMMISSION_AMOUNT_INVALID',
+    ]);
+    assert.deepEqual(errorsOf({ customerDiscountAmount: '1000000001', commissionAmount: '50000' }), ['CUSTOMER_DISCOUNT_AMOUNT_INVALID']);
+    assert.deepEqual(errorsOf({ customerDiscountAmount: '50000', commissionAmount: 'abc' }), ['COMMISSION_AMOUNT_INVALID']);
+    assert.deepEqual(errorsOf({ relationshipKind: 'SHOP', customerDiscountAmount: '1', commissionAmount: '1' }), ['RELATIONSHIP_KIND_INVALID']);
   });
 });
 

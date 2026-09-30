@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
-import { fromDecimal128, toDecimal128 } from '../src/db/decimal.js';
 import { collection } from '../src/db/mongo.js';
 import { SEED_PARTNERS, seedPartners } from '../src/db/seed-local.js';
 import { Agent, PASSWORD, resetDatabase, startServer } from './helpers.js';
@@ -18,12 +17,12 @@ after(async () => {
 });
 
 describe('seed partner accounts', () => {
-  it('adds one partner per kind with its account, rule and QR, and sets VAT when missing', async () => {
+  it('adds one partner per kind with its account, fixed-amount rule and QR, and no VAT', async () => {
     const created = await seedPartners(PASSWORD);
     assert.deepEqual(created, SEED_PARTNERS.map((sample) => sample.account.email));
 
     const tenant = await (await collection('tenants')).findOne({ name: 'Number160' });
-    assert.equal(fromDecimal128(tenant?.vatRate), '0.1000');
+    assert.equal(tenant?.vatRate, undefined);
 
     const partnerAdmin = new Agent(server.baseUrl);
     assert.equal((await partnerAdmin.login('partner@number160.local')).status, 200);
@@ -31,7 +30,8 @@ describe('seed partner accounts', () => {
     assert.equal(mine.status, 200);
     assert.equal(mine.body.partner.name, 'Khách sạn Demo');
     assert.equal(mine.body.partner.relationshipKind, 'COMPANY');
-    assert.equal(mine.body.rule.customerDiscountRate, '0.0700');
+    assert.equal(mine.body.rule.customerDiscountAmount, '100000.0000');
+    assert.equal(mine.body.rule.commissionAmount, '150000.0000');
     assert.match(mine.body.qr.token, /^[A-Za-z0-9_-]{22}$/);
 
     const referrer = new Agent(server.baseUrl);
@@ -53,12 +53,5 @@ describe('seed partner accounts', () => {
     const after = await users.findOne({ email: 'partner@number160.local' });
     assert.equal(after?.passwordHash, before?.passwordHash);
     assert.equal(after?.roles.length, 1);
-  });
-
-  it('does not overwrite a VAT rate the merchant already set', async () => {
-    const tenants = await collection('tenants');
-    await tenants.updateOne({ name: 'Number160' }, { $set: { vatRate: toDecimal128('0.0800') } });
-    await seedPartners(PASSWORD);
-    assert.equal(fromDecimal128((await tenants.findOne({ name: 'Number160' }))?.vatRate), '0.0800');
   });
 });

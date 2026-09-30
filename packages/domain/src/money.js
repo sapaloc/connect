@@ -156,14 +156,71 @@ export function commercialRuleFromPercents({ relationshipKind, totalBudgetPercen
   return invalid.length ? { rule: null, errors: invalid } : { rule, errors: [] };
 }
 
+export const PRICING_MODELS = Object.freeze({
+  FIXED_AMOUNT: 'FIXED_AMOUNT',
+});
+
+/** Upper bound of a fixed discount or commission, in VND. */
+export const MAX_FIXED_AMOUNT = '1000000000';
+
 /**
- * VAT typed as a percent with at most 2 decimals ("8", "10"), stored as a rate ("0.0800").
- * @param {unknown} value
+ * @typedef {{
+ *   relationshipKind: 'COMPANY' | 'INDEPENDENT_INDIVIDUAL',
+ *   pricingModel: 'FIXED_AMOUNT',
+ *   customerDiscountAmount: string,
+ *   commissionAmount: string,
+ * }} FixedRule
  */
-export function parseVatPercent(value) {
-  const percent = parseDecimal(value, 'vatPercent');
-  if (percent.gte(100) || percent.decimalPlaces() > 2) throw new MoneyError('VAT_RATE_INVALID', 'vatPercent must be below 100', 'vatPercent');
-  return text(percent.div(100));
+
+/** @param {{ pricingModel?: unknown } | null | undefined} rule */
+export function isFixedRule(rule) {
+  return rule?.pricingModel === PRICING_MODELS.FIXED_AMOUNT;
+}
+
+/**
+ * Phase 1 rule: the guest gets a fixed VND discount and the partner a fixed VND commission per
+ * redemption, whatever the bill. Whole VND only.
+ * @param {{ relationshipKind: unknown, customerDiscountAmount: unknown, commissionAmount: unknown }} input
+ * @returns {{ rule: FixedRule | null, errors: string[] }}
+ */
+export function fixedRuleFromAmounts({ relationshipKind, customerDiscountAmount, commissionAmount }) {
+  if (relationshipKind !== RELATIONSHIP_KINDS.COMPANY && relationshipKind !== RELATIONSHIP_KINDS.INDEPENDENT_INDIVIDUAL) {
+    return { rule: null, errors: ['RELATIONSHIP_KIND_INVALID'] };
+  }
+  /** @type {string[]} */
+  const errors = [];
+  /** @param {unknown} value @param {string} code */
+  const amount = (value, code) => {
+    try {
+      const parsed = parseDecimal(value, code);
+      if (parsed.lte(0) || parsed.gt(MAX_FIXED_AMOUNT) || !parsed.isInteger()) throw new Error();
+      return text(parsed);
+    } catch {
+      errors.push(`${code}_INVALID`);
+      return null;
+    }
+  };
+  const discount = amount(customerDiscountAmount, 'CUSTOMER_DISCOUNT_AMOUNT');
+  const commission = amount(commissionAmount, 'COMMISSION_AMOUNT');
+  if (!discount || !commission) return { rule: null, errors };
+  return {
+    rule: { relationshipKind, pricingModel: PRICING_MODELS.FIXED_AMOUNT, customerDiscountAmount: discount, commissionAmount: commission },
+    errors: [],
+  };
+}
+
+/**
+ * Redemption of a fixed-rule voucher: the discount is capped at the bill; the partner earns the fixed
+ * commission once, owed by the merchant. No VAT split.
+ * @param {{ grossAmount: unknown, rule: FixedRule }} input
+ */
+export function calculateFixedRedemption({ grossAmount, rule }) {
+  const bill = calculateDirectRedemption({ discountType: DISCOUNT_TYPES.AMOUNT, discountValue: rule.customerDiscountAmount, grossAmount });
+  const obligationType =
+    rule.relationshipKind === RELATIONSHIP_KINDS.COMPANY ? OBLIGATION_TYPES.TENANT_TO_COMPANY : OBLIGATION_TYPES.TENANT_TO_INDEPENDENT_INDIVIDUAL;
+  /** @type {CommissionItem[]} */
+  const commissionItems = [{ obligationType, rate: text(new D(0)), baseAmount: bill.payableAmount, amount: text(new D(rule.commissionAmount)) }];
+  return { ...bill, commissionItems };
 }
 
 /**

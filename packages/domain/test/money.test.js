@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
+  calculateFixedRedemption,
   calculateRedemption,
   commercialRuleErrors,
   displayRedemption,
@@ -160,6 +161,37 @@ describe('@money commercial rule validation (REQ §6)', () => {
     assert.throws(() => calculateRedemption({ grossInvoiceAmount: '0', vatRate: '0.1000', rule: INDEPENDENT_RULE }), /greater than 0/);
     assert.throws(() => calculateRedemption({ grossInvoiceAmount: 2600000.5, vatRate: '0.1000', rule: INDEPENDENT_RULE }), MoneyError);
     assert.throws(() => calculateRedemption({ grossInvoiceAmount: '100000', vatRate: '1.0000', rule: INDEPENDENT_RULE }), /vatRate/);
+  });
+});
+
+describe('@money fixed-amount redemption (phase 1)', () => {
+  const rule = Object.freeze({
+    relationshipKind: /** @type {const} */ ('COMPANY'),
+    pricingModel: /** @type {const} */ ('FIXED_AMOUNT'),
+    customerDiscountAmount: '100000.0000',
+    commissionAmount: '150000.0000',
+  });
+
+  it('takes the fixed discount off the bill and owes the fixed commission, no VAT', () => {
+    const amounts = calculateFixedRedemption({ grossAmount: '2600000', rule });
+    assert.deepEqual(amounts, {
+      grossAmount: '2600000.0000',
+      discountAmount: '100000.0000',
+      payableAmount: '2500000.0000',
+      commissionItems: [{ obligationType: OBLIGATION_TYPES.TENANT_TO_COMPANY, rate: '0.0000', baseAmount: '2500000.0000', amount: '150000.0000' }],
+    });
+  });
+
+  it('caps the discount at the bill; the commission stays fixed', () => {
+    const amounts = calculateFixedRedemption({ grossAmount: 80000, rule: { ...rule, relationshipKind: 'INDEPENDENT_INDIVIDUAL' } });
+    assert.equal(amounts.discountAmount, '80000.0000');
+    assert.equal(amounts.payableAmount, '0.0000');
+    assert.equal(amounts.commissionItems[0].obligationType, OBLIGATION_TYPES.TENANT_TO_INDEPENDENT_INDIVIDUAL);
+    assert.equal(amounts.commissionItems[0].amount, '150000.0000');
+  });
+
+  it('refuses an empty bill', () => {
+    assert.throws(() => calculateFixedRedemption({ grossAmount: '0', rule }), MoneyError);
   });
 });
 

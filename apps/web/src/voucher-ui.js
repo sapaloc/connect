@@ -18,6 +18,8 @@ import { formatDate, formatVnd, t } from './i18n.js';
  *   redemption?: { grossAmount: string, discountAmount: string, payableAmount: string, redeemedAt: string } | null,
  *   voidReason?: string | null,
  *   brand?: Brand | null,
+ *   billPhotos?: { id: string, addedBy: 'GUEST' | 'STAFF', addedAt: string, url: string }[],
+ *   guestBillPhotos?: number,
  * }} Voucher
  * @typedef {{ logoUrl: string | null, color: string | null, textColor: string | null }} Brand
  */
@@ -37,6 +39,31 @@ export function discountText(voucher) {
   return voucher.discountType === 'PERCENT'
     ? t('percentOff', { value: ratePercent(voucher.discountValue) })
     : t('amountOff', { amount: formatVnd(voucher.discountValue) });
+}
+
+/**
+ * Guest discount of a partner rule as voucher terms: a fixed amount, or a percent on a rule from before phase 1.
+ * @param {{ customerDiscountAmount?: string | null, customerDiscountRate?: string | null } | null | undefined} rule
+ * @returns {Pick<Voucher, 'discountType' | 'discountValue'> | null}
+ */
+export function ruleDiscount(rule) {
+  if (rule?.customerDiscountAmount) return { discountType: 'AMOUNT', discountValue: rule.customerDiscountAmount };
+  if (rule?.customerDiscountRate && rule.customerDiscountRate !== '0.0000') return { discountType: 'PERCENT', discountValue: rule.customerDiscountRate };
+  return null;
+}
+
+/**
+ * Guest discount and partner commission of a rule, ready to show: VND amounts, or percents on a rule
+ * from before phase 1.
+ * @param {{ customerDiscountAmount?: string | null, commissionAmount?: string | null, customerDiscountRate?: string | null,
+ *   commissionRate?: string | null, companyCommissionRate?: string | null, individualCommissionRate?: string | null }} rule
+ */
+export function ruleTerms(rule) {
+  if (rule.customerDiscountAmount && rule.commissionAmount) {
+    return { discount: formatVnd(rule.customerDiscountAmount), commission: formatVnd(rule.commissionAmount) };
+  }
+  const commission = rule.commissionRate ?? rule.companyCommissionRate ?? rule.individualCommissionRate ?? '0';
+  return { discount: `${ratePercent(rule.customerDiscountRate ?? '0')}%`, commission: `${ratePercent(commission)}%` };
 }
 
 /** @param {Voucher} voucher */
@@ -193,7 +220,7 @@ export async function voucherImage(voucher) {
 }
 
 /**
- * @typedef {{ token: string, merchantName: string, partnerName: string, discountRate: string | null, brand?: Brand | null }} PartnerQr
+ * @typedef {{ token: string, merchantName: string, partnerName: string, discount: Pick<Voucher, 'discountType' | 'discountValue'> | null, brand?: Brand | null }} PartnerQr
  */
 
 /**
@@ -221,10 +248,10 @@ export async function partnerQrImage(qr) {
     brand: qr.brand,
   });
 
-  if (qr.discountRate) {
+  if (qr.discount) {
     ctx.fillStyle = ACCENT;
     ctx.font = font(96);
-    ctx.fillText(fit(ctx, t('percentOff', { value: ratePercent(qr.discountRate) }), W - 120), W / 2, 430);
+    ctx.fillText(fit(ctx, discountText(qr.discount), W - 120), W / 2, 430);
   }
 
   const image = /** @type {HTMLImageElement} */ (await loadImage(await referralQrDataUrl(qr.token, 560)));

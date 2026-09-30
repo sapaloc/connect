@@ -1,8 +1,12 @@
 import {
+  BILL_PHOTOS_MAX,
   calculateDirectRedemption,
+  calculateFixedRedemption,
   calculateRedemption,
   can,
   effectiveVoucherStatus,
+  GUEST_BILL_PHOTOS_MAX,
+  isFixedRule,
   MoneyError,
   parseDecimal,
   parseDirectDiscount,
@@ -20,6 +24,7 @@ import { RATE_LIMITS } from '../config/security.js';
 import { fromDecimal128, toDecimal128 } from '../db/decimal.js';
 import { collection } from '../db/mongo.js';
 import { withTransaction } from '../db/tx.js';
+import { imageAsset, readBinary, sendPrivateAsset } from '../files/files.js';
 import { HttpError } from '../http/errors.js';
 import { clientIp, readJson, stringField } from '../http/request.js';
 import { sendJson } from '../http/respond.js';
@@ -57,7 +62,7 @@ const RULE_RATES = /** @type {const} */ ([
 ]);
 
 /**
- * The partner's rule as it was when the customer activated the voucher.
+ * The partner's percent rule as it was when the customer activated the voucher (before phase 1).
  * @param {any} snapshot `voucher.ruleSnapshot`
  * @returns {import('#domain').CommercialRule}
  */
@@ -69,17 +74,32 @@ function snapshotRule(snapshot) {
 }
 
 /**
- * Referral redemption: Net/Net commission from the rule snapshot and the merchant VAT at redemption.
+ * Referral redemption from the rule snapshot, without VAT: a fixed rule gives its fixed amounts; a
+ * percent voucher activated before phase 1 earns its rate on what the guest pays.
  * @param {any} voucher
  * @param {unknown} grossAmount
- * @param {import('mongodb').ClientSession} tx
  */
-async function referralAmounts(voucher, grossAmount, tx) {
-  const tenants = await collection('tenants');
-  const tenant = await tenants.findOne({ _id: voucher.tenantId }, { session: tx, projection: { vatRate: 1 } });
-  if (!tenant?.vatRate) throw new HttpError(409, 'VAT_NOT_SET', 'Set the merchant VAT rate before redeeming partner vouchers');
+function referralAmounts(voucher, grossAmount) {
+  const snapshot = voucher.ruleSnapshot;
   try {
-    return calculateRedemption({ grossInvoiceAmount: grossAmount, vatRate: fromDecimal128(tenant.vatRate), rule: snapshotRule(voucher.ruleSnapshot) });
+    if (isFixedRule(snapshot)) {
+      return calculateFixedRedemption({
+        grossAmount,
+        rule: {
+          relationshipKind: snapshot.relationshipKind,
+          pricingModel: snapshot.pricingModel,
+          customerDiscountAmount: fromDecimal128(snapshot.customerDiscountAmount),
+          commissionAmount: fromDecimal128(snapshot.commissionAmount),
+        },
+      });
+    }
+    const legacy = calculateRedemption({ grossInvoiceAmount: grossAmount, vatRate: '0', rule: snapshotRule(snapshot) });
+    return {
+      grossAmount: legacy.grossInvoiceAmount,
+      discountAmount: legacy.customerDiscountAmount,
+      payableAmount: legacy.discountedGrossPayable,
+      commissionItems: legacy.commissionItems,
+    };
   } catch (error) {
     throw moneyToHttp(error);
   }
@@ -149,7 +169,18 @@ function voucherView(voucher, now, merchantNames, brands) {
       : null,
     voidedAt: voucher.voidedAt ? voucher.voidedAt.toISOString() : null,
     voidReason: voucher.voidReason ?? null,
+    billPhotos: (voucher.billPhotos ?? []).map((/** @type {any} */ photo) => ({
+      id: photo.assetId,
+      addedBy: photo.addedBy,
+      addedAt: photo.addedAt.toISOString(),
+      url: `/api/v1/vouchers/${voucher.code}/bill-photos/${photo.assetId}`,
+    })),
   };
+}
+
+/** @param {any} voucher */
+function guestPhotoCount(voucher) {
+  return (voucher.billPhotos ?? []).filter((/** @type {any} */ photo) => photo.addedBy === 'GUEST').length;
 }
 
 /**
@@ -168,6 +199,7 @@ export function publicView(voucher, merchantName, now, brand = null) {
     discountValue: fromDecimal128(voucher.discountValue),
     minBillAmount: voucher.minBillAmount ? fromDecimal128(voucher.minBillAmount) : null,
     validUntil: voucher.validUntil.toISOString(),
+    guestBillPhotos: guestPhotoCount(voucher),
   };
 }
 
@@ -408,19 +440,12 @@ async function redeemVoucher(req, res, ctx) {
 
     const redemptionId = randomUUID();
     let amounts;
-    /** @type {Record<string, unknown>} */
-    let extra = {};
     /** @type {import('#domain').RedemptionAmounts['commissionItems']} */
     let commissionItems = [];
     if (voucher.source === 'REFERRAL') {
-      const referral = await referralAmounts(voucher, body.grossAmount, tx);
-      amounts = { grossAmount: referral.grossInvoiceAmount, discountAmount: referral.customerDiscountAmount, payableAmount: referral.discountedGrossPayable };
-      extra = {
-        vatRate: toDecimal128(referral.vatRate),
-        netNetCommissionBase: toDecimal128(referral.netNetCommissionBase),
-        vatAmount: toDecimal128(referral.vatAmount),
-      };
-      commissionItems = referral.commissionItems;
+      const { commissionItems: items, ...bill } = referralAmounts(voucher, body.grossAmount);
+      amounts = bill;
+      commissionItems = items;
     } else {
       try {
         amounts = calculateDirectRedemption({
@@ -438,7 +463,6 @@ async function redeemVoucher(req, res, ctx) {
       grossAmount: toDecimal128(amounts.grossAmount),
       discountAmount: toDecimal128(amounts.discountAmount),
       payableAmount: toDecimal128(amounts.payableAmount),
-      ...extra,
       redeemedBy: session.userId,
       roleAssignmentId: session.roleAssignmentId,
       redeemedAt: now,
@@ -548,8 +572,94 @@ async function voidRedemption(req, res, ctx) {
   sendJson(res, 200, { voucher: voucherView(voucher, new Date(), await merchantNames([voucher.tenantId])) });
 }
 
+/**
+ * Adds an optional bill photo to a voucher that is not void: private, WebP, capped per voucher.
+ * @param {import('node:http').IncomingMessage} req
+ * @param {import('../http/router.js').Context} ctx
+ * @param {{ filter: Record<string, unknown>, addedBy: 'GUEST' | 'STAFF', userId: string | null }} who
+ */
+async function addBillPhoto(req, ctx, { filter, addedBy, userId }) {
+  const type = String(req.headers['content-type'] ?? '').toLowerCase();
+  if (!type.startsWith('image/') && !type.startsWith('application/octet-stream')) {
+    throw new HttpError(415, 'IMAGE_TYPE_INVALID', 'Send the image as the request body');
+  }
+  const asset = await imageAsset(await readBinary(req), 'PAYMENT_RECEIPT');
+  return withTransaction(async (tx) => {
+    const vouchers = await collection('vouchers');
+    const voucher = await vouchers.findOne(filter, { session: tx });
+    if (!voucher) throw new HttpError(404, 'VOUCHER_NOT_FOUND', 'Voucher not found');
+    if (voucher.status === 'VOID') throw new HttpError(409, 'VOUCHER_VOID', 'This voucher was voided');
+    const photos = voucher.billPhotos ?? [];
+    if (photos.length >= BILL_PHOTOS_MAX || (addedBy === 'GUEST' && guestPhotoCount(voucher) >= GUEST_BILL_PHOTOS_MAX)) {
+      throw new HttpError(409, 'BILL_PHOTOS_FULL', 'This voucher already has the maximum number of bill photos');
+    }
+    const now = new Date();
+    const files = await collection('fileAssets');
+    await files.insertOne({ ...asset, tenantId: voucher.tenantId, createdBy: userId }, { session: tx });
+    const photo = { assetId: asset._id, addedBy, userId, addedAt: now };
+    await vouchers.updateOne({ _id: voucher._id }, { $push: { billPhotos: photo } }, { session: tx });
+    await recordAudit(
+      {
+        ...actorOf(ctx),
+        tenantId: voucher.tenantId,
+        eventType: 'BILL_PHOTO_ADDED',
+        entityType: 'voucher',
+        entityId: voucher._id,
+        after: { assetId: asset._id, addedBy, byteSize: asset.byteSize },
+      },
+      { session: tx },
+    );
+    return { ...voucher, billPhotos: [...photos, photo] };
+  });
+}
+
+/**
+ * Guest adds a photo of the bill from the voucher page (optional). Anyone holding the code may, like
+ * reading the voucher; rate limited and at most 3 per voucher.
+ * @type {import('../http/router.js').Handler}
+ */
+async function guestBillPhoto(req, res, ctx) {
+  await consume(`bill-photo:${clientIp(req)}`, RATE_LIMITS.billPhotoIp);
+  const code = parseVoucherCode(ctx.params.code);
+  if (!code) throw new HttpError(404, 'VOUCHER_NOT_FOUND', 'Voucher not found');
+  const voucher = await addBillPhoto(req, ctx, { filter: { code }, addedBy: 'GUEST', userId: null });
+  sendJson(res, 201, { guestBillPhotos: guestPhotoCount(voucher) });
+}
+
+/**
+ * Counter adds a photo of the bill when redeeming (optional), inside its own merchant.
+ * @type {import('../http/router.js').Handler}
+ */
+async function staffBillPhoto(req, res, ctx) {
+  const session = sessionOf(ctx);
+  const code = parseVoucherCode(ctx.params.code);
+  if (!code) throw new HttpError(404, 'VOUCHER_NOT_FOUND', 'Voucher not found');
+  const voucher = await addBillPhoto(req, ctx, { filter: { code, tenantId: session.tenantId }, addedBy: 'STAFF', userId: session.userId });
+  sendJson(res, 201, { voucher: voucherView(voucher, new Date(), await merchantNames([voucher.tenantId])) });
+}
+
+/**
+ * A bill photo, only for merchant roles that can see the voucher (and the platform admin).
+ * @type {import('../http/router.js').Handler}
+ */
+async function billPhoto(_req, res, ctx) {
+  const session = sessionOf(ctx);
+  if (!can(session.role, 'voucher.list') && !can(session.role, 'voucher.validate')) throw new HttpError(403, 'FORBIDDEN', 'Not allowed for this role');
+  const code = parseVoucherCode(ctx.params.code);
+  const id = ctx.params.id.toLowerCase();
+  const vouchers = await collection('vouchers');
+  const voucher = code && UUID_PATTERN.test(id) ? await vouchers.findOne({ code, ...scopeFilter(session, null), 'billPhotos.assetId': id }) : null;
+  const files = await collection('fileAssets');
+  const asset = voucher ? await files.findOne({ _id: id, tenantId: voucher.tenantId, assetType: 'PAYMENT_RECEIPT' }) : null;
+  if (!asset) throw new HttpError(404, 'FILE_NOT_FOUND', 'File not found');
+  sendPrivateAsset(res, asset);
+}
+
 /** @type {import('../http/router.js').RouteDef[]} */
 export const voucherRoutes = [
+  { method: 'POST', path: '/api/v1/vouchers/:code/bill-photos', handler: authed(staffBillPhoto, { permission: 'redemption.create' }) },
+  { method: 'GET', path: '/api/v1/vouchers/:code/bill-photos/:id', handler: authed(billPhoto) },
+  { method: 'POST', path: '/api/v1/public/vouchers/:code/bill-photos', handler: guestBillPhoto },
   { method: 'GET', path: '/api/v1/vouchers', handler: authed(listVouchers, { permission: 'voucher.list' }) },
   { method: 'POST', path: '/api/v1/vouchers', handler: authed(issueVouchers, { permission: 'voucher.issue' }) },
   { method: 'POST', path: '/api/v1/vouchers/:code/void', handler: authed(voidVoucher, { permission: 'voucher.void' }) },

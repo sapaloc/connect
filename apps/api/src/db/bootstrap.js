@@ -1,4 +1,4 @@
-import { merchantSlug, partnerMediumType, ROLES } from '#domain';
+import { isFixedRule, merchantSlug, partnerMediumType, ROLES } from '#domain';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { hashPassword } from '../auth/password.js';
 import { toDecimal128 } from './decimal.js';
@@ -103,13 +103,34 @@ export function partnerNameKey(name) {
 }
 
 /**
- * @param {import('#domain').CommercialRule} rule
+ * Stored rule fields. A fixed-amount rule keeps the two rates the validator requires at 0 and adds its
+ * amounts as optional fields.
+ * @param {import('#domain').CommercialRule | import('#domain').FixedRule} rule
+ */
+function ruleFields(rule) {
+  /** @type {Record<string, unknown>} */
+  const fields = {};
+  if (isFixedRule(rule)) {
+    const fixed = /** @type {import('#domain').FixedRule} */ (rule);
+    for (const field of RATE_FIELDS) fields[field] = null;
+    fields.totalBudgetRate = toDecimal128('0.0000');
+    fields.customerDiscountRate = toDecimal128('0.0000');
+    fields.pricingModel = fixed.pricingModel;
+    fields.customerDiscountAmount = toDecimal128(fixed.customerDiscountAmount);
+    fields.commissionAmount = toDecimal128(fixed.commissionAmount);
+    return fields;
+  }
+  const percents = /** @type {Record<string, string | undefined>} */ (/** @type {unknown} */ (rule));
+  for (const field of RATE_FIELDS) fields[field] = percents[field] ? toDecimal128(/** @type {string} */ (percents[field])) : null;
+  return fields;
+}
+
+/**
+ * @param {import('#domain').CommercialRule | import('#domain').FixedRule} rule
  * @param {{ tenantId: string, partnerId: string, version: number, createdBy: string | null, now: Date }} meta
  */
 export function newCommercialRule(rule, { tenantId, partnerId, version, createdBy, now }) {
-  /** @type {Record<string, unknown>} */
-  const rates = {};
-  for (const field of RATE_FIELDS) rates[field] = rule[field] ? toDecimal128(/** @type {string} */ (rule[field])) : null;
+  const rates = ruleFields(rule);
   return {
     _id: randomUUID(),
     tenantId,

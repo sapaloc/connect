@@ -1,8 +1,7 @@
-import { ratePercent } from '#domain';
 import { api } from '../api.js';
 import { $, esc } from '../dom.js';
 import { errorText, formatDateTime, formatVnd, t } from '../i18n.js';
-import { downloadBlob, partnerQrImage, referralLink, referralQrDataUrl, sharePartnerQr } from '../voucher-ui.js';
+import { downloadBlob, partnerQrImage, referralLink, referralQrDataUrl, ruleDiscount, ruleTerms, sharePartnerQr } from '../voucher-ui.js';
 import { messageSlot, showMessage } from './common.js';
 
 /** @typedef {import('../main.js').App} App */
@@ -31,9 +30,9 @@ export async function mountMy(_app) {
   const page = $('#my-page');
   try {
     const data = await api('GET', '/api/v1/my/partner');
-    const { partner, rule, qr, stats, recent } = data;
+    const { partner, rule, qr, stats, recent, payouts } = data;
     const share = qr
-      ? { token: qr.token, merchantName: partner.merchantName ?? 'MyConnect', partnerName: partner.name, discountRate: rule?.customerDiscountRate ?? null, brand: partner.brand }
+      ? { token: qr.token, merchantName: partner.merchantName ?? 'MyConnect', partnerName: partner.name, discount: ruleDiscount(rule), brand: partner.brand }
       : null;
 
     page.innerHTML = `
@@ -42,7 +41,7 @@ export async function mountMy(_app) {
         <h2 class="h5 mb-2">${esc(partner.name)}</h2>
         ${
           rule
-            ? `<p class="small mb-3">${esc(t('myRuleLine', { discount: ratePercent(rule.customerDiscountRate), commission: ratePercent(rule.commissionRate ?? '0') }))}</p>`
+            ? `<p class="small mb-3">${esc(t('myRuleLine', ruleTerms(rule)))}</p>`
             : ''
         }
         ${partner.status === 'PAUSED' ? `<p class="form-message" data-tone="error">${esc(t('myPaused'))}</p>` : ''}
@@ -65,6 +64,7 @@ export async function mountMy(_app) {
         ${kpi(t('kpiActivations'), stats.activations)}
         ${kpi(t('kpiRedemptions'), stats.redemptions)}
         ${kpi(t('commissionOwed'), formatVnd(stats.commissionOpen))}
+        ${kpi(t('commissionPaid'), formatVnd(stats.commissionPaid))}
       </section>
 
       <section class="card-sw">
@@ -77,11 +77,29 @@ export async function mountMy(_app) {
                 <li>
                   <span class="text-muted small">${esc(formatDateTime(item.redeemedAt))}</span>
                   <span class="fw-semibold${item.status === 'VOID' ? ' text-decoration-line-through text-muted' : ''}">${esc(formatVnd(item.amount))}</span>
-                  <span class="pill pill-${item.status === 'VOID' ? 'void' : item.status === 'PAID' ? 'redeemed' : 'active'}">${esc(t(`cstatus_${item.status}`))}</span>
+                  <span class="pill pill-${item.status === 'VOID' ? 'void' : item.status === 'PAID' ? 'redeemed' : 'unpaid'}">${esc(t(`cstatus_${item.status}`))}</span>
                 </li>`,
                 )
                 .join('')}</ul>`
             : `<p class="text-muted small mb-0">${esc(t('myNoRecent'))}</p>`
+        }
+      </section>
+
+      <section class="card-sw">
+        <h3 class="card-title">${esc(t('myPayouts'))}</h3>
+        ${
+          payouts.length
+            ? `<ul class="my-recent">${payouts
+                .map(
+                  (/** @type {any} */ payout) => `
+                <li>
+                  <span class="text-muted small">${esc(formatDateTime(payout.paidAt))} · ${esc(t('myPayoutBills', { count: payout.itemCount }))}</span>
+                  <span class="fw-semibold">${esc(formatVnd(payout.amount))}</span>
+                  <span class="pill pill-redeemed">${esc(t('cstatus_PAID'))}</span>
+                </li>`,
+                )
+                .join('')}</ul>`
+            : `<p class="text-muted small mb-0">${esc(t('myNoPayouts'))}</p>`
         }
         <p class="small text-muted mt-3 mb-0">${esc(t('myPayNote'))}</p>
       </section>`;

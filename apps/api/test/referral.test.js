@@ -11,7 +11,7 @@ const HOTEL = {
   name: 'Khách sạn Hoa Sen',
   relationshipKind: 'COMPANY',
   partnerType: 'HOTEL',
-  rule: { totalBudgetPercent: '15', customerDiscountPercent: '7' },
+  rule: { customerDiscountAmount: '100000', commissionAmount: '150000' },
 };
 
 /** @type {Awaited<ReturnType<typeof startServer>>} */
@@ -27,7 +27,6 @@ before(async () => {
   await ensureActiveUser({ email: 'admin@other.local', displayName: 'Other Admin', password: PASSWORD, role: ROLES.TENANT_ADMIN, tenantId: other });
   server = await startServer();
   admin = await signedIn('admin@number160.local');
-  assert.equal((await admin.post('/api/v1/merchant/settings', { vatPercent: '8' })).status, 200);
   const res = await admin.post('/api/v1/partners', HOTEL);
   assert.equal(res.status, 201);
   hotel = res.body.partner;
@@ -68,7 +67,8 @@ describe('partner QR', () => {
       brand: null,
       partnerName: HOTEL.name,
       partnerType: 'HOTEL',
-      discountRate: '0.0700',
+      discountRate: null,
+      discountAmount: '100000.0000',
       validityDays: 7,
     });
     assert.equal(res.body.voucher, null);
@@ -105,8 +105,8 @@ describe('anonymous activation', () => {
     code = voucher.code;
     assert.match(code, /^[A-HJ-NP-Z2-9]{8}$/);
     assert.equal(voucher.status, 'ACTIVE');
-    assert.equal(voucher.discountType, 'PERCENT');
-    assert.equal(voucher.discountValue, '0.0700');
+    assert.equal(voucher.discountType, 'AMOUNT');
+    assert.equal(voucher.discountValue, '100000.0000');
     assert.equal(voucher.merchantName, 'Number160');
     const validFor = new Date(voucher.validUntil).getTime() - before;
     assert.ok(validFor >= 7 * DAY_MS - 5000 && validFor <= 7 * DAY_MS + 5000, `valid for ${validFor} ms`);
@@ -117,6 +117,8 @@ describe('anonymous activation', () => {
     assert.equal(stored?.source, 'REFERRAL');
     assert.equal(stored?.partnerId, hotel.id);
     assert.equal(stored?.ruleSnapshot.version, 1);
+    assert.equal(stored?.ruleSnapshot.pricingModel, 'FIXED_AMOUNT');
+    assert.equal(stored?.ruleSnapshot.commissionAmount.toString(), '150000.0000');
     assert.ok(stored?.referralVisitId);
     assert.ok(stored?.browserContextId);
   });
@@ -152,13 +154,13 @@ describe('anonymous activation', () => {
     assert.equal(found.body.voucher.source, 'REFERRAL');
     const res = await staff.post(`/api/v1/vouchers/${code}/redeem`, { grossAmount: '2600000' });
     assert.equal(res.status, 200);
-    assert.equal(res.body.voucher.redemption.payableAmount, '2418000.0000');
+    assert.equal(res.body.voucher.redemption.payableAmount, '2500000.0000');
   });
 
   it('a new rule version applies to new activations only', async () => {
-    assert.equal((await admin.post(`/api/v1/partners/${hotel.id}/rule`, { totalBudgetPercent: '16', customerDiscountPercent: '8' })).status, 200);
+    assert.equal((await admin.post(`/api/v1/partners/${hotel.id}/rule`, { customerDiscountAmount: '120000', commissionAmount: '150000' })).status, 200);
     const res = await activate(customer(), hotel.qr.token);
-    assert.equal(res.body.voucher.discountValue, '0.0800');
+    assert.equal(res.body.voucher.discountValue, '120000.0000');
     const vouchers = await collection('vouchers');
     assert.equal((await vouchers.findOne({ code }))?.ruleSnapshot.version, 1);
     assert.equal((await vouchers.findOne({ code: res.body.voucher.code }))?.ruleSnapshot.version, 2);

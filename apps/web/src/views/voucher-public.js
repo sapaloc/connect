@@ -1,10 +1,10 @@
-import { parseVoucherCode } from '#domain';
+import { GUEST_BILL_PHOTOS_MAX, parseVoucherCode } from '#domain';
 import { api } from '../api.js';
 import { esc } from '../dom.js';
 import { errorText, t } from '../i18n.js';
 import { langToggle } from './common.js';
 import { mountRedeem } from './redeem.js';
-import { bindVoucherActions, fillQr, voucherActions, voucherCard } from './voucher-card.js';
+import { billPhotoField, bindBillPhoto, bindVoucherActions, fillQr, voucherActions, voucherCard } from './voucher-card.js';
 
 /** @typedef {import('../main.js').App} App */
 
@@ -42,11 +42,19 @@ export async function voucherPublicView(app, rawCode) {
       mountRedeem(/** @type {HTMLElement} */ (document.getElementById('public-redeem')), full, () => app.navigate('/counter'));
       return;
     }
+    const photoOpen = voucher.status !== 'VOID' && voucher.guestBillPhotos < GUEST_BILL_PHOTOS_MAX;
     page.innerHTML = `
       ${voucherCard(voucher)}
-      ${voucher.status === 'ACTIVE' ? `<p class="text-center small text-muted mt-3 mb-2">${esc(t('showAtCounter'))}</p>${voucherActions(voucher)}` : ''}`;
+      ${voucher.status === 'ACTIVE' ? `<p class="text-center small text-muted mt-3 mb-2">${esc(t('showAtCounter'))}</p>${voucherActions(voucher)}` : ''}
+      ${photoOpen ? `<div class="mt-3" id="guest-bill">${billPhotoField('guest-bill-file')}</div>` : ''}`;
     fillQr(page);
     bindVoucherActions(page, voucher);
+    if (photoOpen) {
+      const box = /** @type {HTMLElement} */ (document.getElementById('guest-bill'));
+      bindBillPhoto(box, 'guest-bill-file', `/api/v1/public/vouchers/${encodeURIComponent(code)}/bill-photos`, ({ guestBillPhotos }) => {
+        if (guestBillPhotos >= GUEST_BILL_PHOTOS_MAX) /** @type {HTMLElement} */ (box.querySelector('label')).hidden = true;
+      });
+    }
   } catch (error) {
     page.innerHTML = `<p class="form-message" data-tone="error">${esc(errorText(error))}</p>`;
   }
