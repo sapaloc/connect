@@ -1,8 +1,8 @@
-import { commercialRuleFromPercents, PARTNER_TYPES, ratePercent } from '#domain';
+import { fixedRuleFromAmounts, isFixedRule, PARTNER_TYPES, toVnd } from '#domain';
 import { api } from '../api.js';
 import { $, busy, esc, formValues } from '../dom.js';
 import { errorText, formatDateTime, formatVnd, getLang, t } from '../i18n.js';
-import { downloadBlob, partnerQrImage, referralLink, referralQrDataUrl, sharePartnerQr } from '../voucher-ui.js';
+import { downloadBlob, partnerQrImage, referralLink, referralQrDataUrl, ruleDiscount, ruleTerms, sharePartnerQr } from '../voucher-ui.js';
 import { icon } from '../nav.js';
 import { messageSlot, showLink, showMessage } from './common.js';
 
@@ -13,12 +13,13 @@ import { messageSlot, showLink, showMessage } from './common.js';
  *   relationshipKind: 'COMPANY' | 'INDEPENDENT_INDIVIDUAL', partnerType: string,
  *   status: 'ACTIVE' | 'PAUSED' | 'ENDED', contactName: string | null, contactPhone: string | null,
  *   contactEmail: string | null, note: string | null, createdAt: string, endReason: string | null,
- *   rule: null | { version: number, totalBudgetRate: string, customerDiscountRate: string,
+ *   rule: null | { version: number, pricingModel: 'FIXED_AMOUNT' | null, customerDiscountAmount: string | null,
+ *     commissionAmount: string | null, totalBudgetRate: string, customerDiscountRate: string,
  *     companyCommissionRate: string | null, individualCommissionRate: string | null },
  *   accounts: { id: string, email: string, displayName: string, status: string, role: string }[],
  *   qr: null | { token: string, createdAt: string },
  *   brand?: import('../voucher-ui.js').Brand | null,
- *   stats?: { opens: number, activations: number, redemptions: number, commissionOpen?: string },
+ *   stats?: { opens: number, activations: number, redemptions: number, commissionOpen?: string, commissionPaid?: string, lastPaidAt?: string | null },
  * }} Partner
  */
 
@@ -36,28 +37,32 @@ function languageSelect(id) {
     </select>`;
 }
 
-/** @param {NonNullable<Partner['rule']>} rule */
-function commissionRate(rule) {
-  return /** @type {string} */ (rule.companyCommissionRate ?? rule.individualCommissionRate);
-}
+const AMOUNT_FIELDS = ['customerDiscountAmount', 'commissionAmount'];
+
+/** @param {string} value typed amount, with or without thousands separators */
+const digitsOf = (value) => value.replace(/\D/g, '');
+
+/** @param {string} digits */
+const grouped = (digits) => (digits ? Number(digits).toLocaleString(getLang() === 'vi' ? 'vi-VN' : 'en-US') : '');
 
 /**
- * Two percent inputs and a live explanation of the split.
+ * Two fixed VND amounts: what the guest gets off and what the partner earns per bill.
  * @param {string} prefix
- * @param {{ total?: string, discount?: string }} [values]
+ * @param {{ discount?: string, commission?: string }} [values] stored amounts
  */
 function ruleFields(prefix, values = {}) {
+  const shown = (/** @type {string | undefined} */ amount) => (amount ? grouped(toVnd(amount)) : '');
   return `
     <div class="row g-3">
       <div class="col-6">
-        <label for="${prefix}-total" class="form-label small">${esc(t('totalBudget'))}</label>
-        <input id="${prefix}-total" name="totalBudgetPercent" class="form-control" inputmode="decimal" maxlength="6"
-          value="${esc(values.total ?? '')}" placeholder="15" required />
+        <label for="${prefix}-discount" class="form-label small">${esc(t('customerDiscountAmount'))}</label>
+        <input id="${prefix}-discount" name="customerDiscountAmount" class="form-control" inputmode="numeric" maxlength="16" autocomplete="off"
+          value="${esc(shown(values.discount))}" placeholder="100.000" required />
       </div>
       <div class="col-6">
-        <label for="${prefix}-discount" class="form-label small">${esc(t('customerDiscount'))}</label>
-        <input id="${prefix}-discount" name="customerDiscountPercent" class="form-control" inputmode="decimal" maxlength="6"
-          value="${esc(values.discount ?? '')}" placeholder="7" required />
+        <label for="${prefix}-commission" class="form-label small">${esc(t('commissionAmount'))}</label>
+        <input id="${prefix}-commission" name="commissionAmount" class="form-control" inputmode="numeric" maxlength="16" autocomplete="off"
+          value="${esc(shown(values.commission))}" placeholder="150.000" required />
       </div>
     </div>
     <p class="rule-preview small mt-2 mb-0" id="${prefix}-preview" aria-live="polite">${esc(t('ruleHint'))}</p>`;
@@ -70,21 +75,18 @@ function ruleFields(prefix, values = {}) {
  */
 function bindRulePreview(form, prefix, kindOf) {
   const preview = $(`#${prefix}-preview`, form);
-  const update = () => {
-    const values = formValues(form);
-    const total = values.totalBudgetPercent.replace(',', '.').trim();
-    const discount = values.customerDiscountPercent.replace(',', '.').trim();
-    if (!total || !discount) {
+  const update = (/** @type {Event} [event] */ event) => {
+    const input = /** @type {HTMLInputElement | undefined} */ (event?.target);
+    if (input && AMOUNT_FIELDS.includes(input.name)) input.value = grouped(digitsOf(input.value));
+    const { customerDiscountAmount, commissionAmount } = rulePayload(form);
+    if (!customerDiscountAmount || !commissionAmount) {
       preview.textContent = t('ruleHint');
       preview.dataset.tone = 'info';
       return;
     }
-    const { rule, errors } = commercialRuleFromPercents({ relationshipKind: kindOf(), totalBudgetPercent: total, customerDiscountPercent: discount });
+    const { rule, errors } = fixedRuleFromAmounts({ relationshipKind: kindOf(), customerDiscountAmount, commissionAmount });
     if (rule) {
-      preview.textContent = t('rulePreview', {
-        discount: ratePercent(rule.customerDiscountRate),
-        commission: ratePercent(/** @type {string} */ (rule.companyCommissionRate ?? rule.individualCommissionRate)),
-      });
+      preview.textContent = t('rulePreview', ruleTerms(rule));
       preview.dataset.tone = 'success';
     } else {
       preview.textContent = t(`rule_${errors[0]}`);
@@ -99,30 +101,12 @@ function bindRulePreview(form, prefix, kindOf) {
 /** @param {HTMLFormElement} form */
 function rulePayload(form) {
   const values = formValues(form);
-  return {
-    totalBudgetPercent: values.totalBudgetPercent.replace(',', '.').trim(),
-    customerDiscountPercent: values.customerDiscountPercent.replace(',', '.').trim(),
-  };
+  return { customerDiscountAmount: digitsOf(values.customerDiscountAmount), commissionAmount: digitsOf(values.commissionAmount) };
 }
 
 /** @param {App} app */
 export function partnersPanel(app) {
   const manage = app.state.profile?.permissions.includes('partner.manage') ?? false;
-  const vatSection = `
-    <section class="card-sw" id="vat-card">
-      <h2 class="card-title">${esc(t('vatTitle'))}</h2>
-      <p class="text-muted small mb-3">${esc(t('vatHint'))}</p>
-      <form id="vat-form" class="row g-2 align-items-end" novalidate>
-        <div class="col-6 col-md-3">
-          <label for="vat" class="form-label small">${esc(t('vatPercent'))}</label>
-          <input id="vat" name="vatPercent" class="form-control" inputmode="decimal" maxlength="6" placeholder="8" required />
-        </div>
-        <div class="col-6 col-md-3 d-grid">
-          <button type="submit" class="btn btn-outline-secondary">${esc(t('vatSave'))}</button>
-        </div>
-      </form>
-      ${messageSlot('vat-message')}
-    </section>`;
   const createSection = `
     <section class="card-sw" id="partner-create-card" hidden>
       <h2 class="card-title">${esc(t('partnerCreateTitle'))}</h2>
@@ -203,7 +187,7 @@ export function partnersPanel(app) {
       <div id="partner-link" class="link-box mb-3" hidden></div>
       <div class="partner-list" id="partner-rows"></div>
     </section>
-    ${manage ? createSection + vatSection : ''}`;
+    ${manage ? createSection : ''}`;
 }
 
 /**
@@ -270,7 +254,7 @@ function qrOf(partner) {
     token: /** @type {NonNullable<Partner['qr']>} */ (partner.qr).token,
     merchantName: partner.merchantName ?? 'MyConnect',
     partnerName: partner.name,
-    discountRate: partner.rule?.customerDiscountRate ?? null,
+    discount: ruleDiscount(partner.rule),
     brand: partner.brand ?? null,
   };
 }
@@ -350,24 +334,38 @@ function qrDialog(partner, { manage, onReplaced }) {
   dialog.showModal();
 }
 
-/** @param {NonNullable<Partner['stats']>} stats */
-function partnerStatsLine(stats) {
+/**
+ * Counts, and for roles that see commission: unpaid, paid and the "Mark as paid" button.
+ * @param {Partner} p
+ * @param {boolean} settle
+ */
+function partnerStatsLine(p, settle) {
+  const stats = /** @type {NonNullable<Partner['stats']>} */ (p.stats);
   const counts = t('partnerCounts', { opens: stats.opens, activations: stats.activations, redemptions: stats.redemptions });
+  const unpaid = stats.commissionOpen !== undefined && stats.commissionOpen !== '0.0000';
   return `
-    <p class="small mb-1 partner-stats">
+    <div class="small mb-1 partner-stats">
       <span class="text-muted">${esc(counts)}</span>
-      ${stats.commissionOpen !== undefined ? `<span class="d-block">${esc(t('commissionOwed'))}: <strong>${esc(formatVnd(stats.commissionOpen))}</strong></span>` : ''}
-    </p>`;
+      ${
+        stats.commissionOpen !== undefined
+          ? `<span class="d-block">${esc(t('commissionOwed'))}: <strong>${esc(formatVnd(stats.commissionOpen))}</strong>
+             · ${esc(t('commissionPaid'))}: <strong>${esc(formatVnd(stats.commissionPaid ?? '0'))}</strong></span>
+             ${stats.lastPaidAt ? `<span class="d-block text-muted">${esc(t('lastPaid', { date: formatDateTime(stats.lastPaidAt) }))}</span>` : ''}
+             ${settle && unpaid ? `<button type="button" class="btn btn-sm btn-primary mt-2" data-action="pay" data-id="${esc(p.id)}">${esc(t('markPaid'))}</button>` : ''}`
+          : ''
+      }
+    </div>`;
 }
 
 /**
  * @param {Partner} p
- * @param {{ manage: boolean, showMerchant: boolean }} options
+ * @param {{ manage: boolean, settle: boolean, showMerchant: boolean }} options
  */
-function partnerCard(p, { manage, showMerchant }) {
+function partnerCard(p, { manage, settle, showMerchant }) {
   const rule = p.rule
-    ? `<span class="fw-semibold">${esc(t('ruleShort', { discount: ratePercent(p.rule.customerDiscountRate), commission: ratePercent(commissionRate(p.rule)) }))}</span>
-       <span class="text-muted"> · ${esc(t('ruleVersion', { version: p.rule.version }))}</span>`
+    ? `<span class="fw-semibold">${esc(t('ruleShort', ruleTerms(p.rule)))}</span>
+       <span class="text-muted"> · ${esc(t('ruleVersion', { version: p.rule.version }))}</span>
+       ${isFixedRule(p.rule) ? '' : `<span class="d-block text-muted">${esc(t('ruleLegacy'))}</span>`}`
     : '';
   const accounts = p.accounts.length
     ? p.accounts
@@ -404,7 +402,7 @@ function partnerCard(p, { manage, showMerchant }) {
         <span class="pill pill-${esc(p.status.toLowerCase())}">${esc(t(`status_${p.status}`))}</span>
       </header>
       ${rule ? `<p class="small mb-1">${rule}</p>` : ''}
-      ${p.stats ? partnerStatsLine(p.stats) : ''}
+      ${p.stats ? partnerStatsLine(p, settle) : ''}
       ${contact ? `<p class="small text-muted mb-1">${esc(contact)}</p>` : ''}
       ${p.endReason ? `<p class="small text-muted mb-1">${esc(t('endPartner'))}: ${esc(p.endReason)}</p>` : ''}
       <div class="small partner-accounts"><span class="text-muted d-block">${esc(t('partnerAccounts'))}</span>${accounts}</div>
@@ -416,13 +414,14 @@ function partnerCard(p, { manage, showMerchant }) {
 export function mountPartners(app) {
   const profile = /** @type {import('../api.js').Profile} */ (app.state.profile);
   const manage = profile.permissions.includes('partner.manage');
+  const settle = profile.permissions.includes('commission.settle');
   const showMerchant = !profile.activeRole?.tenantId;
   /** @type {Partner[]} */
   let partners = [];
 
   const renderRows = () => {
     $('#partner-rows').innerHTML = partners.length
-      ? partners.map((p) => partnerCard(p, { manage, showMerchant })).join('')
+      ? partners.map((p) => partnerCard(p, { manage, settle, showMerchant })).join('')
       : `<p class="text-muted mb-0">${esc(t('noPartners'))}</p>`;
   };
 
@@ -455,33 +454,6 @@ export function mountPartners(app) {
     $('[data-create-close]').addEventListener('click', () => {
       setCreateOpen(false);
       $('#partner-list-card').scrollIntoView({ behavior: 'smooth', block: 'start' });
-    });
-
-    const vatForm = /** @type {HTMLFormElement} */ ($('#vat-form'));
-    const vatInput = /** @type {HTMLInputElement} */ ($('#vat'));
-    api('GET', '/api/v1/merchant/settings')
-      .then(({ vatRate }) => {
-        if (vatRate) {
-          vatInput.value = ratePercent(vatRate);
-          showMessage(t('vatCurrent', { rate: ratePercent(vatRate) }), 'info', 'vat-message');
-        } else {
-          // Nothing can be added until VAT is set, so it comes first.
-          $('#partner-list-card').before($('#vat-card'));
-          showMessage(t('vatNotSet'), 'error', 'vat-message');
-        }
-      })
-      .catch((error) => showMessage(errorText(error), 'error', 'vat-message'));
-    vatForm.addEventListener('submit', (event) => {
-      event.preventDefault();
-      busy(vatForm, async () => {
-        try {
-          const { vatRate } = await api('POST', '/api/v1/merchant/settings', { vatPercent: vatInput.value.replace(',', '.').trim() });
-          vatInput.value = ratePercent(vatRate);
-          showMessage(t('vatSaved', { rate: ratePercent(vatRate) }), 'success', 'vat-message');
-        } catch (error) {
-          showMessage(errorText(error), 'error', 'vat-message');
-        }
-      });
     });
 
     const createForm = /** @type {HTMLFormElement} */ ($('#partner-create'));
@@ -552,7 +524,7 @@ export function mountPartners(app) {
       const rule = partner.rule;
       formDialog({
         title: t('editRuleTitle', { name: partner.name }),
-        body: `${ruleFields('d-rule', rule ? { total: ratePercent(rule.totalBudgetRate), discount: ratePercent(rule.customerDiscountRate) } : {})}
+        body: `${ruleFields('d-rule', { discount: rule?.customerDiscountAmount ?? undefined, commission: rule?.commissionAmount ?? undefined })}
           <p class="small text-muted mt-3 mb-0">${esc(t('ruleChangeNote'))}</p>`,
         submit: t('saveBtn'),
         onReady: (form) => bindRulePreview(form, 'd-rule', () => partner.relationshipKind),
@@ -597,7 +569,12 @@ export function mountPartners(app) {
     }
 
     try {
-      if (action === 'pause') {
+      if (action === 'pay') {
+        const amount = formatVnd(partner.stats?.commissionOpen ?? '0');
+        if (!confirm(t('markPaidConfirm', { name: partner.name, amount }))) return;
+        const { payout } = await api('POST', `${path}/payouts`, {});
+        showMessage(t('markPaidDone', { name: partner.name, amount: formatVnd(payout.amount) }), 'success', 'partner-message');
+      } else if (action === 'pause') {
         if (!confirm(t('partnerPauseConfirm', { name: partner.name }))) return;
         await api('POST', `${path}/status`, { status: 'PAUSED' });
       } else if (action === 'resume') {

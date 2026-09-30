@@ -1,4 +1,5 @@
-const MAX_SIDE = 1024;
+const LOGO_MAX_SIDE = 1024;
+const PHOTO_MAX_SIDE = 1600;
 
 /**
  * Decodes the picked file in the browser (HEIC works where the browser can read it, e.g. Safari on
@@ -8,6 +9,26 @@ const MAX_SIDE = 1024;
  * @returns {Promise<Blob>}
  */
 export async function prepareLogo(file) {
+  const canvas = await drawn(file, LOGO_MAX_SIDE);
+  const png = await encode(canvas, 'image/png');
+  // A photo rather than a flat logo: PNG can get close to the 4 MB upload limit, JPEG will not.
+  return png.size <= 3 * 1024 * 1024 ? png : encode(canvas, 'image/jpeg', 0.9);
+}
+
+/**
+ * A camera photo (e.g. a bill): 1600 px JPEG, small enough for a phone upload and still readable.
+ * @param {File} file
+ * @returns {Promise<Blob>}
+ */
+export async function preparePhoto(file) {
+  return encode(await drawn(file, PHOTO_MAX_SIDE), 'image/jpeg', 0.85);
+}
+
+/**
+ * @param {File} file
+ * @param {number} maxSide
+ */
+async function drawn(file, maxSide) {
   let bitmap;
   try {
     bitmap = await createImageBitmap(file);
@@ -15,15 +36,13 @@ export async function prepareLogo(file) {
     const heic = /hei[cf]$/i.test(file.type) || /\.hei[cf]$/i.test(file.name);
     throw Object.assign(new Error('decode'), { code: heic ? 'IMAGE_HEIC_UNSUPPORTED' : 'IMAGE_TYPE_INVALID' });
   }
-  const scale = Math.min(1, MAX_SIDE / Math.max(bitmap.width, bitmap.height));
+  const scale = Math.min(1, maxSide / Math.max(bitmap.width, bitmap.height));
   const canvas = document.createElement('canvas');
   canvas.width = Math.round(bitmap.width * scale);
   canvas.height = Math.round(bitmap.height * scale);
   /** @type {CanvasRenderingContext2D} */ (canvas.getContext('2d')).drawImage(bitmap, 0, 0, canvas.width, canvas.height);
   bitmap.close();
-  const png = await encode(canvas, 'image/png');
-  // A photo rather than a flat logo: PNG can get close to the 4 MB upload limit, JPEG will not.
-  return png.size <= 3 * 1024 * 1024 ? png : encode(canvas, 'image/jpeg', 0.9);
+  return canvas;
 }
 
 /**

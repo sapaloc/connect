@@ -1,4 +1,4 @@
-import { can, commercialRuleFromPercents, PARTNER_STATUSES, PARTNER_TYPES, partnerAccountRole, RELATIONSHIP_KINDS } from '#domain';
+import { can, fixedRuleFromAmounts, isFixedRule, PARTNER_STATUSES, PARTNER_TYPES, partnerAccountRole, RELATIONSHIP_KINDS, sumAmounts } from '#domain';
 import { randomUUID } from 'node:crypto';
 import { actorOf, recordAudit } from '../audit/audit.js';
 import { authed } from '../auth/guard.js';
@@ -11,7 +11,7 @@ import { HttpError } from '../http/errors.js';
 import { readJson, stringField } from '../http/request.js';
 import { sendJson } from '../http/respond.js';
 import { merchantBrands, merchantNames, scopeFilter, UUID_PATTERN } from '../merchants/scope.js';
-import { partnerStats } from './stats.js';
+import { MERCHANT_PAYS, partnerStats, payoutView } from './stats.js';
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -29,13 +29,38 @@ function optionalText(body, key, max) {
   return stringField(body, key, { max, optional: true }).trim() || null;
 }
 
+/**
+ * Contact person of a partner; every field is optional.
+ * @param {Record<string, unknown>} body
+ */
+export function parseContact(body) {
+  const contactEmail = optionalText(body, 'contactEmail', 254)?.toLowerCase() ?? null;
+  if (contactEmail && !EMAIL_PATTERN.test(contactEmail)) {
+    throw new HttpError(422, 'VALIDATION', 'contactEmail is invalid', { details: { field: 'contactEmail' } });
+  }
+  return { contactName: optionalText(body, 'contactName', 120), contactPhone: optionalText(body, 'contactPhone', 32), contactEmail };
+}
+
+/**
+ * Fixed amounts of a stored rule; null on a percent rule created before phase 1.
+ * @param {any} rule stored commercial rule version
+ */
+export function ruleAmounts(rule) {
+  const fixed = isFixedRule(rule);
+  return {
+    pricingModel: fixed ? rule.pricingModel : null,
+    customerDiscountAmount: fixed ? fromDecimal128(rule.customerDiscountAmount) : null,
+    commissionAmount: fixed ? fromDecimal128(rule.commissionAmount) : null,
+  };
+}
+
 /** @param {any} rule stored commercial rule version */
 function ruleView(rule) {
   if (!rule) return null;
   /** @type {Record<string, string | null>} */
   const rates = {};
   for (const field of RATE_FIELDS) rates[field] = rule[field] ? fromDecimal128(rule[field]) : null;
-  return { id: rule._id, version: rule.version, effectiveFrom: rule.effectiveFrom.toISOString(), ...rates };
+  return { id: rule._id, version: rule.version, effectiveFrom: rule.effectiveFrom.toISOString(), ...ruleAmounts(rule), ...rates };
 }
 
 /**
@@ -102,25 +127,24 @@ async function related(partners) {
 }
 
 /**
- * Rates typed as percents; the commission split is derived so it always adds up.
+ * Phase 1: a fixed VND discount for the guest and a fixed VND commission for the partner.
  * @param {string} relationshipKind
  * @param {unknown} input
  */
 function parseRule(relationshipKind, input) {
   const body = input && typeof input === 'object' ? /** @type {Record<string, unknown>} */ (input) : {};
-  const { rule, errors } = commercialRuleFromPercents({
+  const { rule, errors } = fixedRuleFromAmounts({
     relationshipKind,
-    totalBudgetPercent: body.totalBudgetPercent,
-    customerDiscountPercent: body.customerDiscountPercent,
-    individualSharePercent: body.individualSharePercent ?? '0',
+    customerDiscountAmount: body.customerDiscountAmount,
+    commissionAmount: body.commissionAmount,
   });
   if (!rule) throw new HttpError(422, 'COMMERCIAL_RULE_INVALID', 'The commercial rule is invalid', { details: { field: 'rule', reasons: errors } });
   return rule;
 }
 
-/** @param {import('#domain').CommercialRule} rule */
-function rulePercents(rule) {
-  return { totalBudgetRate: rule.totalBudgetRate, customerDiscountRate: rule.customerDiscountRate };
+/** @param {import('#domain').FixedRule} rule */
+function ruleAudit(rule) {
+  return { pricingModel: rule.pricingModel, customerDiscountAmount: rule.customerDiscountAmount, commissionAmount: rule.commissionAmount };
 }
 
 /**
@@ -181,17 +205,10 @@ async function createPartner(req, res, ctx) {
   }
   const partnerType = stringField(body, 'partnerType', { max: 32 });
   if (!PARTNER_TYPES.includes(partnerType)) throw new HttpError(422, 'VALIDATION', 'partnerType is invalid', { details: { field: 'partnerType' } });
-  const contactEmail = optionalText(body, 'contactEmail', 254)?.toLowerCase() ?? null;
-  if (contactEmail && !EMAIL_PATTERN.test(contactEmail)) {
-    throw new HttpError(422, 'VALIDATION', 'contactEmail is invalid', { details: { field: 'contactEmail' } });
-  }
+  const contact = parseContact(body);
   const rule = parseRule(relationshipKind, body.rule);
   const accountBody = body.account && typeof body.account === 'object' ? /** @type {Record<string, unknown>} */ (body.account) : null;
   const account = accountBody ? parsePerson(accountBody) : null;
-
-  const tenants = await collection('tenants');
-  const tenant = await tenants.findOne({ _id: tenantId }, { projection: { vatRate: 1 } });
-  if (!tenant?.vatRate) throw new HttpError(409, 'VAT_NOT_SET', 'Set the merchant VAT rate before adding partners');
 
   const now = new Date();
   const partner = {
@@ -202,9 +219,7 @@ async function createPartner(req, res, ctx) {
     relationshipKind,
     partnerType,
     status: 'ACTIVE',
-    contactName: optionalText(body, 'contactName', 120),
-    contactPhone: optionalText(body, 'contactPhone', 32),
-    contactEmail,
+    ...contact,
     note: optionalText(body, 'note', 500),
     createdBy: session.userId,
     createdAt: now,
@@ -228,7 +243,7 @@ async function createPartner(req, res, ctx) {
           eventType: 'PARTNER_CREATED',
           entityType: 'partner_relationship',
           entityId: partner._id,
-          after: { name, relationshipKind, partnerType, rule: rulePercents(rule) },
+          after: { name, relationshipKind, partnerType, rule: ruleAudit(rule) },
         },
         { session: tx },
       );
@@ -263,7 +278,8 @@ async function changeRule(req, res, ctx) {
     const rule = parseRule(found.relationshipKind, body);
     const commercialRules = await collection('commercialRules');
     const current = await commercialRules.findOne({ partnerId: found._id, status: 'ACTIVE' }, { session: tx });
-    const unchanged = current && RATE_FIELDS.every((field) => (current[field] ? fromDecimal128(current[field]) : null) === (rule[field] ?? null));
+    const before = current ? ruleAmounts(current) : null;
+    const unchanged = before?.customerDiscountAmount === rule.customerDiscountAmount && before?.commissionAmount === rule.commissionAmount;
     if (unchanged) return found;
     const now = new Date();
     if (current) {
@@ -279,8 +295,14 @@ async function changeRule(req, res, ctx) {
         eventType: 'COMMERCIAL_RULE_CHANGED',
         entityType: 'partner_relationship',
         entityId: found._id,
-        before: current ? { version: current.version, totalBudgetRate: fromDecimal128(current.totalBudgetRate), customerDiscountRate: fromDecimal128(current.customerDiscountRate) } : null,
-        after: { version, ...rulePercents(rule) },
+        before: current
+          ? {
+              version: current.version,
+              ...before,
+              ...(isFixedRule(current) ? {} : { totalBudgetRate: fromDecimal128(current.totalBudgetRate), customerDiscountRate: fromDecimal128(current.customerDiscountRate) }),
+            }
+          : null,
+        after: { version, ...ruleAudit(rule) },
       },
       { session: tx },
     );
@@ -386,8 +408,56 @@ async function replaceQr(req, res, ctx) {
   sendJson(res, 200, { partner: partnerView(partner, await related([partner])) });
 }
 
+/**
+ * The merchant has paid the partner all its unpaid commission; how it was paid is not tracked. One
+ * payout is recorded and every OPEN item it covers becomes PAID. Allowed after the partner ended.
+ * @type {import('../http/router.js').Handler}
+ */
+async function markCommissionPaid(req, res, ctx) {
+  const session = sessionOf(ctx);
+  const note = optionalText(await readJson(req), 'note', 300);
+  const payout = await withTransaction(async (tx) => {
+    const partner = await ownPartner(ctx, tx);
+    const items = await collection('commissionItems');
+    const open = await items
+      .find({ tenantId: partner.tenantId, partnerId: partner._id, status: 'OPEN', obligationType: { $in: MERCHANT_PAYS } }, { session: tx, projection: { amount: 1 } })
+      .toArray();
+    if (!open.length) throw new HttpError(409, 'NOTHING_TO_PAY', 'This partner has no unpaid commission');
+    const now = new Date();
+    const doc = {
+      _id: randomUUID(),
+      tenantId: partner.tenantId,
+      partnerId: partner._id,
+      amount: toDecimal128(sumAmounts(open.map((item) => fromDecimal128(item.amount)))),
+      itemCount: open.length,
+      note,
+      paidBy: session.userId,
+      paidAt: now,
+      createdAt: now,
+    };
+    const ids = open.map((item) => item._id);
+    const result = await items.updateMany({ _id: { $in: ids }, status: 'OPEN' }, { $set: { status: 'PAID', paidAt: now, payoutId: doc._id } }, { session: tx });
+    if (result.modifiedCount !== ids.length) throw new HttpError(409, 'COMMISSION_CHANGED', 'The commission changed meanwhile; try again');
+    const payouts = await collection('commissionPayouts');
+    await payouts.insertOne(doc, { session: tx });
+    await recordAudit(
+      {
+        ...actorOf(ctx),
+        eventType: 'COMMISSION_PAID',
+        entityType: 'partner_relationship',
+        entityId: partner._id,
+        after: { payoutId: doc._id, amount: fromDecimal128(doc.amount), itemCount: doc.itemCount },
+      },
+      { session: tx },
+    );
+    return doc;
+  });
+  sendJson(res, 201, { payout: payoutView(payout) });
+}
+
 /** @type {import('../http/router.js').RouteDef[]} */
 export const partnerRoutes = [
+  { method: 'POST', path: '/api/v1/partners/:id/payouts', handler: authed(markCommissionPaid, { permission: 'commission.settle' }) },
   { method: 'GET', path: '/api/v1/partners', handler: authed(listPartners, { permission: 'partner.list' }) },
   { method: 'POST', path: '/api/v1/partners', handler: authed(createPartner, { permission: 'partner.manage' }) },
   { method: 'POST', path: '/api/v1/partners/:id/rule', handler: authed(changeRule, { permission: 'commercial_rule.manage' }) },

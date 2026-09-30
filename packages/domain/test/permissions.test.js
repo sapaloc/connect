@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { can, canInvite, LANDING, PERMISSIONS, permissionsFor, ROLES, surfaceOf } from '../src/index.js';
+import { can, canInvite, LANDING, PERMISSIONS, permissionsFor, roleConflict, ROLES, roleSide, surfaceOf } from '../src/index.js';
 
 const ALL_ROLES = Object.values(ROLES);
 
@@ -29,6 +29,7 @@ const EXPECTED = {
     'voucher.list',
     'voucher.void',
     'commission.list',
+    'commission.settle',
   ],
   MANAGER: [
     'surface.console',
@@ -42,8 +43,8 @@ const EXPECTED = {
     'redemption.void',
   ],
   STAFF: ['surface.counter', 'voucher.validate', 'redemption.create'],
-  PARTNER_ADMIN: ['surface.my', 'commission.view_own'],
-  REFERRER: ['surface.my', 'commission.view_own'],
+  PARTNER_ADMIN: ['surface.my', 'commission.view_own', 'partner.profile_own'],
+  REFERRER: ['surface.my', 'commission.view_own', 'partner.profile_own'],
 };
 
 describe('@permission matrix', () => {
@@ -94,6 +95,32 @@ describe('@permission matrix', () => {
     for (const role of [ROLES.MANAGER, ROLES.STAFF, ROLES.PARTNER_ADMIN, ROLES.REFERRER]) {
       for (const target of ALL_ROLES) assert.equal(canInvite(role, target), false, `${role} -> ${target}`);
     }
+  });
+});
+
+describe('roleConflict: one side per person', () => {
+  const A = 'tenant-a';
+  const B = 'tenant-b';
+
+  it('a partner may work with many merchants', () => {
+    assert.equal(roleConflict([{ role: ROLES.PARTNER_ADMIN, tenantId: A }], { role: ROLES.PARTNER_ADMIN, tenantId: B }), null);
+    assert.equal(roleConflict([{ role: ROLES.REFERRER, tenantId: A }], { role: ROLES.PARTNER_ADMIN, tenantId: B }), null);
+  });
+
+  it('never mixes merchant team, partner and platform roles', () => {
+    assert.equal(roleConflict([{ role: ROLES.PARTNER_ADMIN, tenantId: A }], { role: ROLES.STAFF, tenantId: B }), 'ROLE_SIDE_CONFLICT');
+    assert.equal(roleConflict([{ role: ROLES.MANAGER, tenantId: A }], { role: ROLES.REFERRER, tenantId: A }), 'ROLE_SIDE_CONFLICT');
+    assert.equal(roleConflict([{ role: ROLES.PLATFORM_ADMIN, tenantId: null }], { role: ROLES.TENANT_ADMIN, tenantId: A }), 'ROLE_SIDE_CONFLICT');
+  });
+
+  it('one merchant role per merchant; the same role again is not a conflict', () => {
+    assert.equal(roleConflict([{ role: ROLES.TENANT_ADMIN, tenantId: A }], { role: ROLES.MANAGER, tenantId: A }), 'ROLE_ALREADY_IN_MERCHANT');
+    assert.equal(roleConflict([{ role: ROLES.STAFF, tenantId: A }], { role: ROLES.STAFF, tenantId: A }), null);
+    assert.equal(roleConflict([{ role: ROLES.STAFF, tenantId: A }], { role: ROLES.MANAGER, tenantId: B }), null);
+  });
+
+  it('maps every role to a side', () => {
+    assert.deepEqual(ALL_ROLES.map(roleSide), ['PLATFORM', 'MERCHANT', 'MERCHANT', 'MERCHANT', 'PARTNER', 'PARTNER']);
   });
 });
 

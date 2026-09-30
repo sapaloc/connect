@@ -3,6 +3,7 @@ import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { after, before, describe, it } from 'node:test';
 import { collection } from '../src/db/mongo.js';
+import { seedPartners } from '../src/db/seed-local.js';
 import { Agent, PASSWORD, resetDatabase, startServer, tokenFromLink } from './helpers.js';
 
 const NEW_PASSWORD = 'Welcome#2026';
@@ -91,30 +92,53 @@ describe('@permission role boundaries', () => {
     assert.equal(res.status, 403);
   });
 
-  it('a user with several roles must choose; no highest-privilege default (C3)', async () => {
-    const multi = agent();
-    const login = await multi.login('multi@number160.local');
+  it('a partner of two merchants must choose one; each choice sees only that merchant (C3)', async () => {
+    await seedPartners(PASSWORD);
+    const partner = agent();
+    const login = await partner.login('partner@number160.local');
     assert.equal(login.status, 200);
     assert.equal(login.body.activeRole, null);
     assert.equal(login.body.needsRoleSelection, true);
     assert.deepEqual(login.body.permissions, []);
-    assert.equal(login.body.roles.length, 2);
+    assert.deepEqual(login.body.roles.map((/** @type {any} */ r) => [r.role, r.tenantName]), [
+      ['PARTNER_ADMIN', 'Nhà hàng Demo'],
+      ['PARTNER_ADMIN', 'Number160'],
+    ]);
 
-    const blocked = await multi.get('/api/v1/users');
+    const blocked = await partner.get('/api/v1/my/partner');
     assert.equal(blocked.status, 403);
     assert.equal(blocked.body.error.code, 'ROLE_NOT_SELECTED');
 
-    const pendingCookie = multi.cookie;
-    const manager = login.body.roles.find((/** @type {any} */ r) => r.role === 'MANAGER');
-    const selected = await multi.post('/api/v1/auth/select-role', { roleAssignmentId: manager.roleAssignmentId });
+    const pendingCookie = partner.cookie;
+    const [restaurant, spa] = login.body.roles;
+    const selected = await partner.post('/api/v1/auth/select-role', { roleAssignmentId: restaurant.roleAssignmentId });
     assert.equal(selected.status, 200);
-    assert.equal(selected.body.activeRole.role, 'MANAGER');
-    assert.notEqual(multi.cookie, pendingCookie, 'role change must issue a new session');
-    assert.equal((await multi.get('/api/v1/users')).status, 403, 'Manager role cannot list users');
+    assert.notEqual(partner.cookie, pendingCookie, 'role change must issue a new session');
+    const atRestaurant = await partner.get('/api/v1/my/partner');
+    assert.equal(atRestaurant.body.partner.merchantName, 'Nhà hàng Demo');
+    assert.equal(atRestaurant.body.rule.commissionAmount, '80000.0000');
+
+    await partner.post('/api/v1/auth/select-role', { roleAssignmentId: spa.roleAssignmentId });
+    const atSpa = await partner.get('/api/v1/my/partner');
+    assert.equal(atSpa.body.partner.merchantName, 'Number160');
+    assert.equal(atSpa.body.rule.commissionAmount, '150000.0000');
 
     const stale = new Agent(server.baseUrl);
     stale.cookie = pendingCookie;
     assert.equal((await stale.get('/api/v1/auth/me')).status, 401, 'old session is revoked');
+  });
+
+  it('never mixes merchant team and partner roles, nor two team roles in one merchant', async () => {
+    const admin = agent();
+    await admin.login('admin@number160.local');
+    const asStaff = await admin.post('/api/v1/users/invitations', { email: 'partner@number160.local', displayName: 'P', role: 'STAFF' });
+    assert.equal(asStaff.status, 409);
+    assert.equal(asStaff.body.error.code, 'ROLE_SIDE_CONFLICT');
+    const second = await admin.post('/api/v1/users/invitations', { email: 'manager@number160.local', displayName: 'M', role: 'STAFF' });
+    assert.equal(second.status, 409);
+    assert.equal(second.body.error.code, 'ROLE_ALREADY_IN_MERCHANT');
+    const users = await collection('users');
+    assert.equal((await users.findOne({ email: 'manager@number160.local' }))?.roles.length, 1);
   });
 
   it('cannot select a role assignment that belongs to someone else', async () => {

@@ -35,6 +35,7 @@ export const RATE_LIMITS = Object.freeze({
   publicVoucherIp: { max: 60, windowMs: 15 * MINUTE },
   publicReferralIp: { max: 60, windowMs: 15 * MINUTE },
   referralActivateIp: { max: 20, windowMs: 15 * MINUTE },
+  billPhotoIp: { max: 10, windowMs: 15 * MINUTE },
 });
 
 /** scrypt cost: ~50 ms and 32 MiB per hash on a Vercel function. */

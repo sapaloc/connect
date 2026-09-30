@@ -1,8 +1,7 @@
-import { brandColorFor, MERCHANT_SLUG_PATTERN, merchantSlug, parseVatPercent, ROLES } from '#domain';
+import { brandColorFor, MERCHANT_SLUG_PATTERN, merchantSlug, ROLES } from '#domain';
 import { actorOf, recordAudit } from '../audit/audit.js';
 import { authed } from '../auth/guard.js';
 import { newTenant } from '../db/bootstrap.js';
-import { fromDecimal128, toDecimal128 } from '../db/decimal.js';
 import { collection } from '../db/mongo.js';
 import { withTransaction } from '../db/tx.js';
 import { imageAsset, readBinary } from '../files/files.js';
@@ -172,37 +171,9 @@ async function setMerchantStatus(req, res, ctx) {
 /** @type {import('../http/router.js').Handler} */
 async function merchantSettings(_req, res, ctx) {
   const tenants = await collection('tenants');
-  const tenant = await tenants.findOne({ _id: sessionOf(ctx).tenantId }, { projection: { name: 1, vatRate: 1, logoAssetId: 1, brandColor: 1 } });
+  const tenant = await tenants.findOne({ _id: sessionOf(ctx).tenantId }, { projection: { name: 1, logoAssetId: 1, brandColor: 1 } });
   if (!tenant) throw new HttpError(404, 'TENANT_NOT_FOUND', 'Merchant not found');
-  sendJson(res, 200, { name: tenant.name, vatRate: tenant.vatRate ? fromDecimal128(tenant.vatRate) : null, brand: brandView(tenant) });
-}
-
-/**
- * VAT rate used to split VAT out of what the customer pays (Net/Net commission base, plan §7).
- * Each referral redemption snapshots the rate in force at that moment.
- * @type {import('../http/router.js').Handler}
- */
-async function updateMerchantSettings(req, res, ctx) {
-  const tenantId = /** @type {string} */ (sessionOf(ctx).tenantId);
-  const body = await readJson(req);
-  let vatRate;
-  try {
-    vatRate = parseVatPercent(body.vatPercent);
-  } catch {
-    throw new HttpError(422, 'VALIDATION', 'vatPercent is invalid', { details: { field: 'vatPercent' } });
-  }
-  await withTransaction(async (tx) => {
-    const tenants = await collection('tenants');
-    const before = await tenants.findOne({ _id: tenantId }, { session: tx, projection: { vatRate: 1 } });
-    const previous = before?.vatRate ? fromDecimal128(before.vatRate) : null;
-    if (previous === vatRate) return;
-    await tenants.updateOne({ _id: tenantId }, { $set: { vatRate: toDecimal128(vatRate) } }, { session: tx });
-    await recordAudit(
-      { ...actorOf(ctx), eventType: 'MERCHANT_VAT_CHANGED', entityType: 'tenant', entityId: tenantId, before: { vatRate: previous }, after: { vatRate } },
-      { session: tx },
-    );
-  });
-  sendJson(res, 200, { vatRate });
+  sendJson(res, 200, { name: tenant.name, brand: brandView(tenant) });
 }
 
 /**
@@ -313,7 +284,6 @@ async function setBrandColor(req, res, ctx) {
 /** @type {import('../http/router.js').RouteDef[]} */
 export const merchantRoutes = [
   { method: 'GET', path: '/api/v1/merchant/settings', handler: authed(merchantSettings, { permission: 'partner.list' }) },
-  { method: 'POST', path: '/api/v1/merchant/settings', handler: authed(updateMerchantSettings, { permission: 'merchant.settings' }) },
   { method: 'POST', path: '/api/v1/merchant/brand', handler: authed(setBrandColor, { permission: 'merchant.settings' }) },
   { method: 'POST', path: '/api/v1/merchant/logo', handler: authed(uploadOwnLogo, { permission: 'merchant.settings' }) },
   { method: 'POST', path: '/api/v1/merchant/logo/remove', handler: authed(removeOwnLogo, { permission: 'merchant.settings' }) },

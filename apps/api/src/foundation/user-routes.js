@@ -1,4 +1,4 @@
-import { canInvite, ROLES } from '#domain';
+import { canInvite, roleConflict, ROLES } from '#domain';
 import { randomUUID } from 'node:crypto';
 import { actorOf, recordAudit } from '../audit/audit.js';
 import { authed } from '../auth/guard.js';
@@ -145,10 +145,17 @@ export async function inviteMember(req, ctx, { email, displayName, role, preferr
 
   const users = await collection('users');
   const now = new Date();
-  let user = await users.findOne({ email }, { session: tx, projection: { status: 1 } });
+  let user = await users.findOne({ email }, { session: tx, projection: { status: 1, roles: 1 } });
   if (user && user.status !== 'INVITED' && user.status !== 'ACTIVE') {
     throw new HttpError(409, 'USER_NOT_INVITABLE', 'This account is blocked or ended');
   }
+  const conflict = user
+    ? roleConflict(
+        (user.roles ?? []).filter((/** @type {any} */ assignment) => assignment.status === 'ACTIVE'),
+        { role, tenantId },
+      )
+    : null;
+  if (conflict) throw new HttpError(409, conflict, 'This account already has a role that cannot be combined with this one');
   if (!user) {
     user = { _id: randomUUID(), status: 'INVITED' };
     await users.insertOne(

@@ -4,7 +4,7 @@ import { $, busy, esc } from '../dom.js';
 import { errorText, formatDateTime, formatVnd, getLang, t } from '../i18n.js';
 import { discountText, termsText } from '../voucher-ui.js';
 import { messageSlot, showMessage } from './common.js';
-import { statusPill } from './voucher-card.js';
+import { billPhotoField, bindBillPhoto, statusPill } from './voucher-card.js';
 
 /** @typedef {import('../voucher-ui.js').Voucher} Voucher */
 
@@ -104,8 +104,10 @@ export function mountRedeem(root, voucher, onDone) {
             <p class="redeem-ok">${esc(t('redeemDone'))}</p>
             <p class="redeem-code" translate="no">${esc(formatVoucherCode(done.code))}</p>
             ${amountRows(done.redemption)}
+            <div class="mb-3">${billPhotoField('staff-bill-file')}</div>
             <button type="button" class="btn btn-primary btn-lg w-100" data-next>${esc(t('nextCustomer'))}</button>
           </section>`;
+        bindBillPhoto(root, 'staff-bill-file', `/api/v1/vouchers/${encodeURIComponent(done.code)}/bill-photos`);
         root.querySelector('[data-next]')?.addEventListener('click', onDone);
       } catch (error) {
         showMessage(errorText(error), 'error', 'redeem-message');

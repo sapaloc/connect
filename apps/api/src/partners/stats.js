@@ -5,19 +5,32 @@ import { collection } from '../db/mongo.js';
 export const MERCHANT_PAYS = ['TENANT_TO_COMPANY', 'TENANT_TO_INDEPENDENT_INDIVIDUAL'];
 
 /**
- * @typedef {{ opens: number, activations: number, redemptions: number, commissionOpen?: string }} PartnerStats
+ * @typedef {{
+ *   opens: number, activations: number, redemptions: number,
+ *   commissionOpen?: string, commissionPaid?: string, lastPaidAt?: string | null,
+ * }} PartnerStats
  */
+
+/** @param {any} payout stored commission payout */
+export function payoutView(payout) {
+  return { id: payout._id, amount: fromDecimal128(payout.amount), itemCount: payout.itemCount, note: payout.note ?? null, paidAt: payout.paidAt.toISOString() };
+}
 
 /**
  * Event counts per partner (plan J11: link opens, voucher activations, redemptions; never "customers").
- * Commission owed = sum of OPEN items, exact to 4 decimals; only when `withCommission`.
+ * Commission unpaid / paid = sums of OPEN / PAID items, exact to 4 decimals; only when `withCommission`.
  * @param {string[]} partnerIds
  * @param {{ withCommission: boolean }} options
  * @returns {Promise<Map<string, PartnerStats>>}
  */
 export async function partnerStats(partnerIds, { withCommission }) {
   /** @type {Map<string, PartnerStats>} */
-  const stats = new Map(partnerIds.map((id) => [id, { opens: 0, activations: 0, redemptions: 0, ...(withCommission ? { commissionOpen: '0.0000' } : {}) }]));
+  const stats = new Map(
+    partnerIds.map((id) => [
+      id,
+      { opens: 0, activations: 0, redemptions: 0, ...(withCommission ? { commissionOpen: '0.0000', commissionPaid: '0.0000', lastPaidAt: null } : {}) },
+    ]),
+  );
   if (!partnerIds.length) return stats;
   const match = { partnerId: { $in: partnerIds } };
 
@@ -37,13 +50,21 @@ export async function partnerStats(partnerIds, { withCommission }) {
 
   if (withCommission) {
     const items = await collection('commissionItems');
-    const owed = await items
+    const sums = await items
       .aggregate([
-        { $match: { ...match, status: 'OPEN', obligationType: { $in: MERCHANT_PAYS } } },
-        { $group: { _id: '$partnerId', amount: { $sum: '$amount' } } },
+        { $match: { ...match, status: { $in: ['OPEN', 'PAID'] }, obligationType: { $in: MERCHANT_PAYS } } },
+        { $group: { _id: { partnerId: '$partnerId', status: '$status' }, amount: { $sum: '$amount' } } },
       ])
       .toArray();
-    for (const row of owed) /** @type {PartnerStats} */ (stats.get(row._id)).commissionOpen = fromDecimal128(row.amount);
+    for (const row of sums) {
+      const entry = /** @type {PartnerStats} */ (stats.get(row._id.partnerId));
+      if (row._id.status === 'OPEN') entry.commissionOpen = fromDecimal128(row.amount);
+      else entry.commissionPaid = fromDecimal128(row.amount);
+    }
+    const payouts = await collection('commissionPayouts');
+    for (const row of await payouts.aggregate([{ $match: match }, { $group: { _id: '$partnerId', last: { $max: '$paidAt' } } }]).toArray()) {
+      /** @type {PartnerStats} */ (stats.get(row._id)).lastPaidAt = row.last.toISOString();
+    }
   }
   return stats;
 }

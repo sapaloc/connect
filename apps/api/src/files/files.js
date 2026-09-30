@@ -9,6 +9,7 @@ import { sendError } from '../http/respond.js';
 /** Resize and WebP settings per asset type (plan §21.3). */
 const WEBP = /** @type {const} */ ({
   BRAND_LOGO: { maxSide: 512, quality: 85 },
+  PAYMENT_RECEIPT: { maxSide: 1600, quality: 80 },
 });
 /** Asset types anyone may read (shown on public pages). */
 const PUBLIC_TYPES = ['BRAND_LOGO'];
@@ -77,6 +78,20 @@ export async function imageAsset(input, assetType) {
 /** @param {string | null | undefined} assetId */
 export function fileUrl(assetId) {
   return assetId ? `/api/v1/files/${assetId}` : null;
+}
+
+/**
+ * Image behind a sign-in check (e.g. a bill photo): cached by this browser only.
+ * @param {import('node:http').ServerResponse} res
+ * @param {any} asset
+ */
+export function sendPrivateAsset(res, asset) {
+  const body = Buffer.from(asset.data.buffer);
+  res.statusCode = 200;
+  res.setHeader('Content-Type', asset.mimeType);
+  res.setHeader('Content-Length', String(body.length));
+  res.setHeader('Cache-Control', 'private, max-age=3600');
+  res.end(body);
 }
 
 /**

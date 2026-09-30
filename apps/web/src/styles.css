@@ -663,9 +663,17 @@ a.brand:hover {
   color: #2f8758;
 }
 
+.merchant-switch {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
 .pill-invited,
 .pill-onboarding,
-.pill-paused {
+.pill-paused,
+.pill-unpaid {
   background: #f4e4c8;
   color: #8e6322;
 }
@@ -805,6 +813,46 @@ a.brand:hover {
   gap: 8px;
   max-width: 360px;
   margin: 16px auto 0;
+}
+
+.bill-photo {
+  max-width: 360px;
+  margin: 0 auto;
+}
+
+.bill-photo .btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.bill-photo .btn svg {
+  width: 18px;
+  height: 18px;
+}
+
+.bill-photos {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 8px;
+}
+
+.bill-photos a {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--sw-ink3);
+  text-decoration: none;
+}
+
+.bill-photos img {
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  object-fit: cover;
+  border: 1px solid var(--sw-line);
+  border-radius: 10px;
+  background: var(--sw-bg);
 }
 
 .vdialog {

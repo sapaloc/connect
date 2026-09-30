@@ -7,6 +7,9 @@ export const MIN_CONTRAST = 4.5;
 export const LOGO_UPLOAD_MAX_BYTES = 4 * 1024 * 1024;
 /** Stored WebP limit (plan §21.3). */
 export const FILE_ASSET_MAX_BYTES = 1024 * 1024;
+/** Bill photos per voucher: at most 3 from the guest, 5 in total. */
+export const GUEST_BILL_PHOTOS_MAX = 3;
+export const BILL_PHOTOS_MAX = 5;
 
 /**
  * "#1a2b3c", "1A2B3C" or "#abc" -> "#1A2B3C"; anything else -> null.
