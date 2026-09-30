@@ -1,4 +1,15 @@
-import { can, fixedRuleFromAmounts, isFixedRule, PARTNER_STATUSES, PARTNER_TYPES, partnerAccountRole, RELATIONSHIP_KINDS, sumAmounts } from '#domain';
+import {
+  can,
+  fixedRuleFromAmounts,
+  isFixedRule,
+  PARTNER_STATUSES,
+  PARTNER_TYPES,
+  partnerAccountRole,
+  percentRuleFromPercents,
+  PRICING_MODELS,
+  RELATIONSHIP_KINDS,
+  sumAmounts,
+} from '#domain';
 import { randomUUID } from 'node:crypto';
 import { actorOf, recordAudit } from '../audit/audit.js';
 import { authed } from '../auth/guard.js';
@@ -42,13 +53,13 @@ export function parseContact(body) {
 }
 
 /**
- * Fixed amounts of a stored rule; null on a percent rule created before phase 1.
+ * Pricing model and fixed amounts of a stored rule; the amounts are null on a percent rule.
  * @param {any} rule stored commercial rule version
  */
 export function ruleAmounts(rule) {
   const fixed = isFixedRule(rule);
   return {
-    pricingModel: fixed ? rule.pricingModel : null,
+    pricingModel: fixed ? rule.pricingModel : PRICING_MODELS.PERCENT,
     customerDiscountAmount: fixed ? fromDecimal128(rule.customerDiscountAmount) : null,
     commissionAmount: fixed ? fromDecimal128(rule.commissionAmount) : null,
   };
@@ -127,24 +138,46 @@ async function related(partners) {
 }
 
 /**
- * Phase 1: a fixed VND discount for the guest and a fixed VND commission for the partner.
+ * `pricingModel` FIXED_AMOUNT (default): fixed VND discount and commission per bill. PERCENT: percent
+ * of the bill off for the guest, percent of what the guest pays for the partner.
  * @param {string} relationshipKind
  * @param {unknown} input
+ * @returns {import('#domain').FixedRule | import('#domain').CommercialRule}
  */
 function parseRule(relationshipKind, input) {
   const body = input && typeof input === 'object' ? /** @type {Record<string, unknown>} */ (input) : {};
-  const { rule, errors } = fixedRuleFromAmounts({
-    relationshipKind,
-    customerDiscountAmount: body.customerDiscountAmount,
-    commissionAmount: body.commissionAmount,
-  });
+  const model = body.pricingModel ?? PRICING_MODELS.FIXED_AMOUNT;
+  if (model !== PRICING_MODELS.FIXED_AMOUNT && model !== PRICING_MODELS.PERCENT) {
+    throw new HttpError(422, 'VALIDATION', 'pricingModel is invalid', { details: { field: 'pricingModel' } });
+  }
+  const { rule, errors } =
+    model === PRICING_MODELS.PERCENT
+      ? percentRuleFromPercents({ relationshipKind, customerDiscountPercent: body.customerDiscountPercent, commissionPercent: body.commissionPercent })
+      : fixedRuleFromAmounts({ relationshipKind, customerDiscountAmount: body.customerDiscountAmount, commissionAmount: body.commissionAmount });
   if (!rule) throw new HttpError(422, 'COMMERCIAL_RULE_INVALID', 'The commercial rule is invalid', { details: { field: 'rule', reasons: errors } });
   return rule;
 }
 
-/** @param {import('#domain').FixedRule} rule */
-function ruleAudit(rule) {
-  return { pricingModel: rule.pricingModel, customerDiscountAmount: rule.customerDiscountAmount, commissionAmount: rule.commissionAmount };
+/** @param {any} rule parsed rule, or a stored rule with its rates already as strings */
+function ruleTerms(rule) {
+  if (isFixedRule(rule)) {
+    return { pricingModel: rule.pricingModel, customerDiscountAmount: rule.customerDiscountAmount, commissionAmount: rule.commissionAmount };
+  }
+  return {
+    pricingModel: PRICING_MODELS.PERCENT,
+    customerDiscountRate: rule.customerDiscountRate,
+    commissionRate: rule.companyCommissionRate ?? rule.individualCommissionRate ?? null,
+  };
+}
+
+/** @param {any} stored stored commercial rule version */
+function storedTerms(stored) {
+  /** @type {Record<string, unknown>} */
+  const plain = { pricingModel: stored.pricingModel };
+  for (const field of [...RATE_FIELDS, 'customerDiscountAmount', 'commissionAmount']) {
+    plain[field] = stored[field] ? fromDecimal128(stored[field]) : null;
+  }
+  return ruleTerms(plain);
 }
 
 /**
@@ -243,7 +276,7 @@ async function createPartner(req, res, ctx) {
           eventType: 'PARTNER_CREATED',
           entityType: 'partner_relationship',
           entityId: partner._id,
-          after: { name, relationshipKind, partnerType, rule: ruleAudit(rule) },
+          after: { name, relationshipKind, partnerType, rule: ruleTerms(rule) },
         },
         { session: tx },
       );
@@ -278,9 +311,9 @@ async function changeRule(req, res, ctx) {
     const rule = parseRule(found.relationshipKind, body);
     const commercialRules = await collection('commercialRules');
     const current = await commercialRules.findOne({ partnerId: found._id, status: 'ACTIVE' }, { session: tx });
-    const before = current ? ruleAmounts(current) : null;
-    const unchanged = before?.customerDiscountAmount === rule.customerDiscountAmount && before?.commissionAmount === rule.commissionAmount;
-    if (unchanged) return found;
+    const before = current ? storedTerms(current) : null;
+    const after = ruleTerms(rule);
+    if (before && JSON.stringify(before) === JSON.stringify(after)) return found;
     const now = new Date();
     if (current) {
       await commercialRules.updateOne({ _id: current._id, status: 'ACTIVE' }, { $set: { status: 'SUPERSEDED', supersededAt: now } }, { session: tx });
@@ -295,14 +328,8 @@ async function changeRule(req, res, ctx) {
         eventType: 'COMMERCIAL_RULE_CHANGED',
         entityType: 'partner_relationship',
         entityId: found._id,
-        before: current
-          ? {
-              version: current.version,
-              ...before,
-              ...(isFixedRule(current) ? {} : { totalBudgetRate: fromDecimal128(current.totalBudgetRate), customerDiscountRate: fromDecimal128(current.customerDiscountRate) }),
-            }
-          : null,
-        after: { version, ...ruleAudit(rule) },
+        before: current ? { version: current.version, ...before } : null,
+        after: { version, ...after },
       },
       { session: tx },
     );

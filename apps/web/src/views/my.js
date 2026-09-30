@@ -90,7 +90,7 @@ export async function mountMy(app) {
         <h2 class="h5 mb-2">${esc(partner.name)}</h2>
         ${
           rule
-            ? `<p class="small mb-3">${esc(t('myRuleLine', ruleTerms(rule)))}</p>`
+            ? `<p class="small mb-3">${esc(t(rule.customerDiscountAmount ? 'myRuleLine' : 'myRuleLinePercent', ruleTerms(rule)))}</p>`
             : ''
         }
         ${partner.status === 'PAUSED' ? `<p class="form-message" data-tone="error">${esc(t('myPaused'))}</p>` : ''}

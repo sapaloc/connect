@@ -112,6 +112,53 @@ describe('@money @permission partners and commercial rules', () => {
     );
   });
 
+  it('switches to percent terms and back: each switch is a new version, the same terms are not', async () => {
+    const admin = await signedIn('admin@number160.local');
+    const path = `/api/v1/partners/${hotelId}/rule`;
+    const percent = await admin.post(path, { pricingModel: 'PERCENT', customerDiscountPercent: '10', commissionPercent: '15' });
+    assert.equal(percent.status, 200);
+    assert.deepEqual(
+      (({ version, pricingModel, customerDiscountAmount, customerDiscountRate, companyCommissionRate }) => ({
+        version,
+        pricingModel,
+        customerDiscountAmount,
+        customerDiscountRate,
+        companyCommissionRate,
+      }))(percent.body.partner.rule),
+      { version: 3, pricingModel: 'PERCENT', customerDiscountAmount: null, customerDiscountRate: '0.1000', companyCommissionRate: '0.1500' },
+    );
+    const same = await admin.post(path, { pricingModel: 'PERCENT', customerDiscountPercent: '10.00', commissionPercent: '15' });
+    assert.equal(same.body.partner.rule.version, 3);
+
+    const invalid = await admin.post(path, { pricingModel: 'PERCENT', customerDiscountPercent: '3', commissionPercent: '15' });
+    assert.equal(invalid.status, 422);
+    assert.deepEqual(invalid.body.error.details.reasons, ['CUSTOMER_DISCOUNT_BELOW_MINIMUM']);
+    assert.equal((await admin.post(path, { pricingModel: 'VAT', customerDiscountAmount: '1', commissionAmount: '1' })).status, 422);
+
+    const fixed = await admin.post(path, { pricingModel: 'FIXED_AMOUNT', customerDiscountAmount: '120000', commissionAmount: '150000' });
+    assert.equal(fixed.body.partner.rule.version, 4);
+    assert.equal(fixed.body.partner.rule.pricingModel, 'FIXED_AMOUNT');
+
+    const audit = await (await collection('auditEvents')).find({ eventType: 'COMMERCIAL_RULE_CHANGED', entityId: hotelId }, { sort: { createdAt: 1 } }).toArray();
+    const [toPercent, toFixed] = audit.slice(-2);
+    assert.deepEqual(toPercent.after, { version: 3, pricingModel: 'PERCENT', customerDiscountRate: '0.1000', commissionRate: '0.1500' });
+    assert.deepEqual(toFixed.before, { version: 3, pricingModel: 'PERCENT', customerDiscountRate: '0.1000', commissionRate: '0.1500' });
+    assert.equal(toFixed.after.pricingModel, 'FIXED_AMOUNT');
+  });
+
+  it('creates a partner with percent terms', async () => {
+    const admin = await signedIn('admin@number160.local');
+    const res = await admin.post('/api/v1/partners', {
+      ...HOTEL,
+      name: 'Khách sạn Phần Trăm',
+      rule: { pricingModel: 'PERCENT', customerDiscountPercent: '7', commissionPercent: '8' },
+    });
+    assert.equal(res.status, 201);
+    assert.equal(res.body.partner.rule.pricingModel, 'PERCENT');
+    assert.equal(res.body.partner.rule.customerDiscountRate, '0.0700');
+    assert.equal(res.body.partner.rule.companyCommissionRate, '0.0800');
+  });
+
   it('independent individual: the account invited is a Referrer who lands on MyConnect', async () => {
     const admin = await signedIn('admin@number160.local');
     const res = await admin.post('/api/v1/partners', {

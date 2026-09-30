@@ -8,6 +8,7 @@ import {
   parseVoucherCode,
   partnerAccountRole,
   partnerMediumType,
+  percentRuleFromPercents,
   ROLES,
 } from '../src/index.js';
 
@@ -118,6 +119,44 @@ describe('@money fixed-amount rule', () => {
     assert.deepEqual(errorsOf({ customerDiscountAmount: '1000000001', commissionAmount: '50000' }), ['CUSTOMER_DISCOUNT_AMOUNT_INVALID']);
     assert.deepEqual(errorsOf({ customerDiscountAmount: '50000', commissionAmount: 'abc' }), ['COMMISSION_AMOUNT_INVALID']);
     assert.deepEqual(errorsOf({ relationshipKind: 'SHOP', customerDiscountAmount: '1', commissionAmount: '1' }), ['RELATIONSHIP_KIND_INVALID']);
+  });
+});
+
+describe('@money percent terms (discount % + commission %)', () => {
+  it('company 10% + 15%: total budget 25%, full commission, no individual share', () => {
+    const { rule, errors } = percentRuleFromPercents({ relationshipKind: 'COMPANY', customerDiscountPercent: '10', commissionPercent: '15' });
+    assert.deepEqual(errors, []);
+    assert.deepEqual(rule, {
+      relationshipKind: 'COMPANY',
+      totalBudgetRate: '0.2500',
+      customerDiscountRate: '0.1000',
+      companyCommissionRate: '0.1500',
+      individualShareRate: '0.0000',
+      companyNetCommissionRate: '0.1500',
+    });
+    assert.equal(isFixedRule(rule), false);
+  });
+
+  it('individual 7.5% + 12.25%', () => {
+    const { rule } = percentRuleFromPercents({ relationshipKind: 'INDEPENDENT_INDIVIDUAL', customerDiscountPercent: '7.5', commissionPercent: '12.25' });
+    assert.deepEqual(rule, {
+      relationshipKind: 'INDEPENDENT_INDIVIDUAL',
+      totalBudgetRate: '0.1975',
+      customerDiscountRate: '0.0750',
+      individualCommissionRate: '0.1225',
+    });
+  });
+
+  it('refuses zero, 3 decimals, a total above 100%, a discount below 5% and unknown kinds', () => {
+    const errorsOf = (/** @type {Record<string, unknown>} */ input) =>
+      percentRuleFromPercents(/** @type {any} */ ({ relationshipKind: 'COMPANY', ...input })).errors;
+    assert.deepEqual(errorsOf({ customerDiscountPercent: '0', commissionPercent: '10.125' }), [
+      'CUSTOMER_DISCOUNT_PERCENT_INVALID',
+      'COMMISSION_PERCENT_INVALID',
+    ]);
+    assert.deepEqual(errorsOf({ customerDiscountPercent: '60', commissionPercent: '40.01' }), ['TOTAL_PERCENT_ABOVE_100']);
+    assert.deepEqual(errorsOf({ customerDiscountPercent: '4.99', commissionPercent: '10' }), ['CUSTOMER_DISCOUNT_BELOW_MINIMUM']);
+    assert.deepEqual(errorsOf({ relationshipKind: 'SHOP', customerDiscountPercent: '10', commissionPercent: '10' }), ['RELATIONSHIP_KIND_INVALID']);
   });
 });
 
