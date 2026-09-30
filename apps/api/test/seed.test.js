@@ -46,6 +46,12 @@ describe('seed partner accounts', () => {
     const own = await referrer.get('/api/v1/my/partner');
     assert.equal(own.status, 200);
     assert.equal(own.body.partner.relationshipKind, 'INDEPENDENT_INDIVIDUAL');
+
+    const driver = new Agent(server.baseUrl);
+    assert.equal((await driver.login('taixe.demo@example.com')).status, 200);
+    const driverOwn = await driver.get('/api/v1/my/partner');
+    assert.equal(driverOwn.body.partner.name, 'Tài xế Demo');
+    assert.equal(driverOwn.body.rule.commissionAmount, '70000.0000');
   });
 
   it('running again adds nothing and keeps changed data', async () => {
@@ -55,8 +61,8 @@ describe('seed partner accounts', () => {
     assert.deepEqual(await seedPartners('Another-Passw0rd!'), []);
 
     const partners = await collection('partners');
-    assert.equal(await partners.countDocuments({ nameKey: { $in: ['khách sạn demo', 'hướng dẫn viên demo'] } }), 3);
-    assert.equal(await (await collection('commercialRules')).countDocuments({ partnerId: { $in: (await partners.find().toArray()).map((p) => p._id) } }), 3);
+    assert.equal(await partners.countDocuments({ nameKey: { $in: ['khách sạn demo', 'hướng dẫn viên demo', 'tài xế demo'] } }), 4);
+    assert.equal(await (await collection('commercialRules')).countDocuments({ partnerId: { $in: (await partners.find().toArray()).map((p) => p._id) } }), 4);
     const after = await users.findOne({ email: 'partner@number160.local' });
     assert.equal(after?.passwordHash, before?.passwordHash);
     assert.equal(after?.roles.length, 2);

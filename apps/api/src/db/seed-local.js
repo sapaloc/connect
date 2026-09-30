@@ -43,6 +43,14 @@ export const SEED_PARTNERS = Object.freeze([
     account: { email: 'referrer@number160.local', displayName: 'Referrer' },
   },
   {
+    merchant: SEED_TENANT,
+    name: 'Tài xế Demo',
+    partnerType: 'DRIVER',
+    relationshipKind: RELATIONSHIP_KINDS.INDEPENDENT_INDIVIDUAL,
+    rule: { customerDiscountAmount: '50000', commissionAmount: '70000' },
+    account: { email: 'taixe.demo@example.com', displayName: 'Tài xế Demo' },
+  },
+  {
     merchant: SEED_SECOND_MERCHANT.name,
     name: 'Khách sạn Demo',
     partnerType: 'HOTEL',
