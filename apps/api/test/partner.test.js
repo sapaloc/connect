@@ -12,7 +12,7 @@ const HOTEL = {
   partnerType: 'HOTEL',
   contactName: 'Chị Mai',
   contactPhone: '0905 111 222',
-  rule: { totalBudgetPercent: '15', customerDiscountPercent: '7' },
+  rule: { customerDiscountAmount: '100000', commissionAmount: '150000' },
 };
 
 /** @type {Awaited<ReturnType<typeof startServer>>} */
@@ -36,29 +36,13 @@ async function signedIn(email) {
   return agent;
 }
 
-describe('@money merchant VAT', () => {
-  it('a partner cannot be added before the VAT rate is set', async () => {
+describe('@money merchant settings', () => {
+  it('no VAT: settings only carry the name and brand, and VAT can no longer be set', async () => {
     const admin = await signedIn('admin@number160.local');
-    const res = await admin.post('/api/v1/partners', HOTEL);
-    assert.equal(res.status, 409);
-    assert.equal(res.body.error.code, 'VAT_NOT_SET');
-  });
-
-  it('Merchant admin sets VAT as a percent; it is stored as a 4-decimal rate and audited', async () => {
-    const admin = await signedIn('admin@number160.local');
-    assert.equal((await admin.post('/api/v1/merchant/settings', { vatPercent: '8.5.1' })).status, 422);
-    const res = await admin.post('/api/v1/merchant/settings', { vatPercent: '10' });
-    assert.equal(res.status, 200);
-    assert.equal(res.body.vatRate, '0.1000');
-    assert.equal((await admin.get('/api/v1/merchant/settings')).body.vatRate, '0.1000');
-    const audit = await collection('auditEvents');
-    assert.equal(await audit.countDocuments({ eventType: 'MERCHANT_VAT_CHANGED' }), 1);
-  });
-
-  it('Manager can read the VAT rate but not change it', async () => {
-    const manager = await signedIn('manager@number160.local');
-    assert.equal((await manager.get('/api/v1/merchant/settings')).status, 200);
-    assert.equal((await manager.post('/api/v1/merchant/settings', { vatPercent: '8' })).status, 403);
+    const settings = await admin.get('/api/v1/merchant/settings');
+    assert.equal(settings.status, 200);
+    assert.equal(settings.body.vatRate, undefined);
+    assert.equal((await admin.post('/api/v1/merchant/settings', { vatPercent: '10' })).status, 405);
   });
 });
 
@@ -66,7 +50,7 @@ describe('@money @permission partners and commercial rules', () => {
   /** @type {string} */
   let hotelId;
 
-  it('Merchant admin creates a company partner; the commission split is derived from the typed percents', async () => {
+  it('Merchant admin creates a company partner with a fixed discount and a fixed commission, no VAT needed', async () => {
     const admin = await signedIn('admin@number160.local');
     const res = await admin.post('/api/v1/partners', HOTEL);
     assert.equal(res.status, 201);
@@ -80,27 +64,30 @@ describe('@money @permission partners and commercial rules', () => {
         id: undefined,
         effectiveFrom: undefined,
         version: 1,
-        totalBudgetRate: '0.1500',
-        customerDiscountRate: '0.0700',
-        companyCommissionRate: '0.0800',
-        individualShareRate: '0.0000',
-        companyNetCommissionRate: '0.0800',
+        pricingModel: 'FIXED_AMOUNT',
+        customerDiscountAmount: '100000.0000',
+        commissionAmount: '150000.0000',
+        totalBudgetRate: '0.0000',
+        customerDiscountRate: '0.0000',
+        companyCommissionRate: null,
+        individualShareRate: null,
+        companyNetCommissionRate: null,
         individualCommissionRate: null,
       },
     );
     const rules = await collection('commercialRules');
     const stored = await rules.findOne({ partnerId: hotelId });
-    assert.equal(stored?.customerDiscountRate._bsontype, 'Decimal128');
+    assert.equal(stored?.commissionAmount._bsontype, 'Decimal128');
   });
 
-  it('refuses a discount below 5% and a discount that leaves no commission', async () => {
+  it('refuses a zero, fractional or percent-only rule', async () => {
     const admin = await signedIn('admin@number160.local');
-    const low = await admin.post('/api/v1/partners', { ...HOTEL, name: 'Low', rule: { totalBudgetPercent: '15', customerDiscountPercent: '4' } });
-    assert.equal(low.status, 422);
-    assert.equal(low.body.error.code, 'COMMERCIAL_RULE_INVALID');
-    assert.deepEqual(low.body.error.details.reasons, ['CUSTOMER_DISCOUNT_BELOW_MINIMUM']);
-    const none = await admin.post('/api/v1/partners', { ...HOTEL, name: 'None', rule: { totalBudgetPercent: '10', customerDiscountPercent: '10' } });
-    assert.deepEqual(none.body.error.details.reasons, ['CUSTOMER_DISCOUNT_NOT_BELOW_TOTAL_BUDGET']);
+    const zero = await admin.post('/api/v1/partners', { ...HOTEL, name: 'Zero', rule: { customerDiscountAmount: '0', commissionAmount: '1000.5' } });
+    assert.equal(zero.status, 422);
+    assert.equal(zero.body.error.code, 'COMMERCIAL_RULE_INVALID');
+    assert.deepEqual(zero.body.error.details.reasons, ['CUSTOMER_DISCOUNT_AMOUNT_INVALID', 'COMMISSION_AMOUNT_INVALID']);
+    const percent = await admin.post('/api/v1/partners', { ...HOTEL, name: 'Old', rule: { totalBudgetPercent: '15', customerDiscountPercent: '7' } });
+    assert.equal(percent.status, 422);
   });
 
   it('refuses a duplicate name within the merchant, case-insensitive', async () => {
@@ -112,11 +99,11 @@ describe('@money @permission partners and commercial rules', () => {
 
   it('changing the rule creates version 2 and supersedes version 1', async () => {
     const admin = await signedIn('admin@number160.local');
-    const res = await admin.post(`/api/v1/partners/${hotelId}/rule`, { totalBudgetPercent: '16', customerDiscountPercent: '8' });
+    const res = await admin.post(`/api/v1/partners/${hotelId}/rule`, { customerDiscountAmount: '120000', commissionAmount: '150000' });
     assert.equal(res.status, 200);
     assert.equal(res.body.partner.rule.version, 2);
-    assert.equal(res.body.partner.rule.companyCommissionRate, '0.0800');
-    const same = await admin.post(`/api/v1/partners/${hotelId}/rule`, { totalBudgetPercent: '16', customerDiscountPercent: '8' });
+    assert.equal(res.body.partner.rule.customerDiscountAmount, '120000.0000');
+    const same = await admin.post(`/api/v1/partners/${hotelId}/rule`, { customerDiscountAmount: '120000', commissionAmount: '150000' });
     assert.equal(same.body.partner.rule.version, 2);
     const rules = await collection('commercialRules');
     assert.deepEqual(
@@ -131,11 +118,11 @@ describe('@money @permission partners and commercial rules', () => {
       name: 'Anh Tuấn',
       relationshipKind: 'INDEPENDENT_INDIVIDUAL',
       partnerType: 'DRIVER',
-      rule: { totalBudgetPercent: '12', customerDiscountPercent: '5' },
+      rule: { customerDiscountAmount: '50000', commissionAmount: '80000' },
       account: { email: 'Tuan@driver.local', displayName: 'Anh Tuấn', preferredLanguage: 'vi' },
     });
     assert.equal(res.status, 201);
-    assert.equal(res.body.partner.rule.individualCommissionRate, '0.0700');
+    assert.equal(res.body.partner.rule.commissionAmount, '80000.0000');
     assert.equal(res.body.partner.accounts[0].role, 'REFERRER');
     const accept = await new Agent(server.baseUrl).post('/api/v1/auth/invitations/accept', {
       token: tokenFromLink(res.body.invitation.inviteUrl),

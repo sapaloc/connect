@@ -1,7 +1,7 @@
 import { brandColorFor, brandTextColor, parseBrandColor } from '#domain';
 import { api } from '../api.js';
 import { $, busy, esc } from '../dom.js';
-import { errorText, t } from '../i18n.js';
+import { errorText, formatVnd, t } from '../i18n.js';
 import { prepareLogo } from '../image.js';
 import { messageSlot, showMessage } from './common.js';
 import { cardHead } from './voucher-card.js';
@@ -65,7 +65,7 @@ export async function mountBrand(app) {
     const brand = { logoUrl: saved?.logoUrl ?? null, color, textColor: color ? brandTextColor(color) : null };
     $('#brand-preview').innerHTML = `
       ${cardHead({ eyebrow: t('voucherTitle'), merchantName, brand })}
-      <div class="vcard-body"><p class="vcard-discount mb-0">${esc(t('percentOff', { value: '10' }))}</p></div>`;
+      <div class="vcard-body"><p class="vcard-discount mb-0">${esc(t('amountOff', { amount: formatVnd('100000') }))}</p></div>`;
     if (!hex.value.trim()) return showMessage('', 'info', 'brand-color-message');
     const check = brandColorFor(hex.value);
     if ('error' in check) showMessage(t(`err_${check.error}`), 'error', 'brand-color-message');

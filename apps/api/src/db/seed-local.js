@@ -1,9 +1,8 @@
-import { commercialRuleFromPercents, partnerAccountRole, passwordPolicyErrors, RELATIONSHIP_KINDS, ROLES } from '#domain';
+import { fixedRuleFromAmounts, partnerAccountRole, passwordPolicyErrors, RELATIONSHIP_KINDS, ROLES } from '#domain';
 import { randomUUID } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import { canSeedTestAccounts, env, requireEnv } from '../config/env.js';
 import { ensureActiveUser, ensureTenant, newCommercialRule, newReferralMedium, partnerNameKey } from './bootstrap.js';
-import { toDecimal128 } from './decimal.js';
 import { closeClient, collection } from './mongo.js';
 import { withTransaction } from './tx.js';
 
@@ -23,20 +22,17 @@ export const SEED_PARTNERS = Object.freeze([
     name: 'Khách sạn Demo',
     partnerType: 'HOTEL',
     relationshipKind: RELATIONSHIP_KINDS.COMPANY,
-    rule: { totalBudgetPercent: '18', customerDiscountPercent: '7' },
+    rule: { customerDiscountAmount: '100000', commissionAmount: '150000' },
     account: { email: 'partner@number160.local', displayName: 'Partner Admin' },
   },
   {
     name: 'Hướng dẫn viên Demo',
     partnerType: 'TOUR_GUIDE',
     relationshipKind: RELATIONSHIP_KINDS.INDEPENDENT_INDIVIDUAL,
-    rule: { totalBudgetPercent: '15', customerDiscountPercent: '5' },
+    rule: { customerDiscountAmount: '50000', commissionAmount: '100000' },
     account: { email: 'referrer@number160.local', displayName: 'Referrer' },
   },
 ]);
-
-/** Referral vouchers cannot be redeemed until the merchant has a VAT rate. */
-const SEED_VAT_RATE = '0.1000';
 
 /** @param {string} password */
 export function seed(password) {
@@ -61,15 +57,13 @@ export function seed(password) {
 }
 
 /**
- * Adds whatever is missing of SEED_PARTNERS (partner, rule v1, QR, account) and the merchant VAT rate.
+ * Adds whatever is missing of SEED_PARTNERS (partner, rule v1, QR, account).
  * Existing partners, accounts and passwords are left as they are. Returns the emails created.
  * @param {string} password
  */
 export function seedPartners(password) {
   return withTransaction(async (session) => {
     const tenantId = await ensureTenant(SEED_TENANT, { session });
-    const tenants = await collection('tenants');
-    await tenants.updateOne({ _id: tenantId, vatRate: { $exists: false } }, { $set: { vatRate: toDecimal128(SEED_VAT_RATE) } }, { session });
     const users = await collection('users');
     const admin = await users.findOne({ email: 'admin@number160.local' }, { session, projection: { _id: 1 } });
     if (!admin) throw new Error('seed partners: admin@number160.local is missing, run the base seed first');
@@ -81,7 +75,7 @@ export function seedPartners(password) {
       const nameKey = partnerNameKey(sample.name);
       let partner = await partners.findOne({ tenantId, nameKey }, { session });
       if (!partner) {
-        const { rule, errors } = commercialRuleFromPercents({ relationshipKind: sample.relationshipKind, ...sample.rule });
+        const { rule, errors } = fixedRuleFromAmounts({ relationshipKind: sample.relationshipKind, ...sample.rule });
         if (!rule) throw new Error(`seed rule for ${sample.name} is invalid: ${errors.join(', ')}`);
         const now = new Date();
         partner = {

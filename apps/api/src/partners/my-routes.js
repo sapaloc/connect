@@ -4,7 +4,8 @@ import { collection } from '../db/mongo.js';
 import { HttpError } from '../http/errors.js';
 import { brandView } from '../merchants/scope.js';
 import { sendJson } from '../http/respond.js';
-import { MERCHANT_PAYS, partnerStats } from './stats.js';
+import { ruleAmounts } from './partner-routes.js';
+import { MERCHANT_PAYS, partnerStats, payoutView } from './stats.js';
 
 const RECENT_LIMIT = 20;
 
@@ -31,6 +32,8 @@ async function myPartner(_req, res, ctx) {
   const recent = await items
     .find({ partnerId: partner._id, obligationType: { $in: MERCHANT_PAYS } }, { sort: { redeemedAt: -1 }, limit: RECENT_LIMIT })
     .toArray();
+  const payouts = await collection('commissionPayouts');
+  const paid = await payouts.find({ partnerId: partner._id }, { sort: { paidAt: -1 }, limit: RECENT_LIMIT }).toArray();
   const commissionRate = rule?.companyCommissionRate ?? rule?.individualCommissionRate ?? null;
 
   sendJson(res, 200, {
@@ -43,7 +46,11 @@ async function myPartner(_req, res, ctx) {
       status: partner.status,
     },
     rule: rule
-      ? { customerDiscountRate: fromDecimal128(rule.customerDiscountRate), commissionRate: commissionRate ? fromDecimal128(commissionRate) : null }
+      ? {
+          ...ruleAmounts(rule),
+          customerDiscountRate: fromDecimal128(rule.customerDiscountRate),
+          commissionRate: commissionRate ? fromDecimal128(commissionRate) : null,
+        }
       : null,
     qr: medium ? { token: medium.publicToken } : null,
     stats,
@@ -52,7 +59,9 @@ async function myPartner(_req, res, ctx) {
       baseAmount: fromDecimal128(item.baseAmount),
       amount: fromDecimal128(item.amount),
       status: item.status,
+      paidAt: item.paidAt ? item.paidAt.toISOString() : null,
     })),
+    payouts: paid.map(payoutView),
   });
 }
 

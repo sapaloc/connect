@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
 import { ROLES } from '#domain';
+import sharp from 'sharp';
 import { ensureActiveUser, ensureTenant } from '../src/db/bootstrap.js';
 import { collection } from '../src/db/mongo.js';
 import { endOfVietnamDay } from '../src/vouchers/voucher-routes.js';
@@ -261,5 +262,91 @@ describe('@money @permission redeeming at the counter', () => {
     assert.equal((await (await signedIn('staff@number160.local')).get(path)).body.canRedeem, true);
     assert.equal((await (await signedIn('staff@other.local')).get(path)).body.canRedeem, false);
     assert.equal((await (await signedIn('admin@number160.local')).get(path)).body.canRedeem, false);
+  });
+});
+
+describe('@permission bill photos', () => {
+  /**
+   * @param {Agent} agent
+   * @param {string} path
+   * @param {Buffer} body
+   */
+  async function upload(agent, path, body) {
+    const res = await fetch(agent.baseUrl + path, {
+      method: 'POST',
+      headers: { 'content-type': 'application/octet-stream', cookie: agent.cookie, 'x-forwarded-for': agent.ip },
+      body,
+    });
+    return { status: res.status, body: await res.json() };
+  }
+
+  const billJpeg = () => sharp({ create: { width: 1200, height: 1800, channels: 3, background: '#F4F1EA' } }).jpeg().toBuffer();
+
+  /** @type {string} */
+  let code;
+
+  it('a guest adds up to 3 photos from the voucher page; the public page only shows the count', async () => {
+    const manager = await signedIn('manager@number160.local');
+    code = (await manager.post('/api/v1/vouchers', TERMS)).body.vouchers[0].code;
+    const guest = new Agent(server.baseUrl);
+    const path = `/api/v1/public/vouchers/${code}/bill-photos`;
+    for (let n = 1; n <= 3; n++) {
+      const res = await upload(guest, path, await billJpeg());
+      assert.equal(res.status, 201);
+      assert.equal(res.body.guestBillPhotos, n);
+    }
+    const full = await upload(guest, path, await billJpeg());
+    assert.equal(full.status, 409);
+    assert.equal(full.body.error.code, 'BILL_PHOTOS_FULL');
+    const shown = await guest.get(`/api/v1/public/vouchers/${code}`);
+    assert.equal(shown.body.voucher.guestBillPhotos, 3);
+    assert.doesNotMatch(JSON.stringify(shown.body), /bill-photos|assetId/);
+
+    const files = await collection('fileAssets');
+    const stored = await files.find({ assetType: 'PAYMENT_RECEIPT' }).toArray();
+    assert.equal(stored.length, 3);
+    assert.ok(stored.every((asset) => asset.mimeType === 'image/webp' && Math.max(asset.width, asset.height) <= 1600 && asset.createdBy === null));
+  });
+
+  it('refuses a file that is not an image', async () => {
+    const manager = await signedIn('manager@number160.local');
+    const other = (await manager.post('/api/v1/vouchers', TERMS)).body.vouchers[0].code;
+    const res = await upload(new Agent(server.baseUrl), `/api/v1/public/vouchers/${other}/bill-photos`, Buffer.from('not an image'));
+    assert.equal(res.status, 415);
+  });
+
+  it('the counter adds a photo when redeeming; merchant roles see it, others do not', async () => {
+    const staff = await signedIn('staff@number160.local');
+    assert.equal((await staff.post(`/api/v1/vouchers/${code}/redeem`, { grossAmount: '500000' })).status, 200);
+    const res = await upload(staff, `/api/v1/vouchers/${code}/bill-photos`, await billJpeg());
+    assert.equal(res.status, 201);
+    const photos = res.body.voucher.billPhotos;
+    assert.deepEqual(photos.map((/** @type {any} */ p) => p.addedBy), ['GUEST', 'GUEST', 'GUEST', 'STAFF']);
+
+    const admin = await signedIn('admin@number160.local');
+    const listed = (await admin.get('/api/v1/vouchers')).body.vouchers.find((/** @type {any} */ v) => v.code === code);
+    assert.equal(listed.billPhotos.length, 4);
+    const image = await fetch(server.baseUrl + photos[3].url, { headers: { cookie: admin.cookie, 'x-forwarded-for': admin.ip } });
+    assert.equal(image.status, 200);
+    assert.equal(image.headers.get('content-type'), 'image/webp');
+    assert.match(image.headers.get('cache-control') ?? '', /private/);
+
+    const anonymous = await fetch(server.baseUrl + photos[3].url);
+    assert.equal(anonymous.status, 401);
+    const otherAdmin = await signedIn('admin@other.local');
+    const foreign = await fetch(server.baseUrl + photos[3].url, { headers: { cookie: otherAdmin.cookie, 'x-forwarded-for': otherAdmin.ip } });
+    assert.equal(foreign.status, 404);
+    assert.equal((await fetch(`${server.baseUrl}/api/v1/files/${photos[3].id}`)).status, 404);
+    assert.equal((await upload(otherAdmin, `/api/v1/vouchers/${code}/bill-photos`, await billJpeg())).status, 403);
+    assert.equal((await upload(await signedIn('staff@other.local'), `/api/v1/vouchers/${code}/bill-photos`, await billJpeg())).status, 404);
+  });
+
+  it('a voided voucher takes no photo', async () => {
+    const admin = await signedIn('admin@number160.local');
+    const voided = (await admin.post('/api/v1/vouchers', TERMS)).body.vouchers[0].code;
+    await admin.post(`/api/v1/vouchers/${voided}/void`, { reason: 'test' });
+    const res = await upload(new Agent(server.baseUrl), `/api/v1/public/vouchers/${voided}/bill-photos`, await billJpeg());
+    assert.equal(res.status, 409);
+    assert.equal(res.body.error.code, 'VOUCHER_VOID');
   });
 });

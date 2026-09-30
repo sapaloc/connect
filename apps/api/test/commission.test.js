@@ -2,24 +2,24 @@ import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
 import { ROLES } from '#domain';
 import { ensureActiveUser, ensureTenant } from '../src/db/bootstrap.js';
-import { fromDecimal128 } from '../src/db/decimal.js';
+import { fromDecimal128, toDecimal128 } from '../src/db/decimal.js';
 import { collection } from '../src/db/mongo.js';
 import { Agent, PASSWORD, resetDatabase, startServer, tokenFromLink } from './helpers.js';
 
 const NEW_PASSWORD = 'Welcome#2026';
-/** Plan §7.1 fixture: VAT 10 %, guest discount 7 %, company commission 8 %. */
+/** Phase 1: fixed guest discount and fixed partner commission, no VAT. */
 const HOTEL = {
   name: 'Khách sạn Hoa Sen',
   relationshipKind: 'COMPANY',
   partnerType: 'HOTEL',
-  rule: { totalBudgetPercent: '15', customerDiscountPercent: '7' },
+  rule: { customerDiscountAmount: '100000', commissionAmount: '150000' },
   account: { email: 'mai@hoasen.local', displayName: 'Chị Mai' },
 };
 const DRIVER = {
   name: 'Anh Tuấn',
   relationshipKind: 'INDEPENDENT_INDIVIDUAL',
   partnerType: 'DRIVER',
-  rule: { totalBudgetPercent: '12', customerDiscountPercent: '5' },
+  rule: { customerDiscountAmount: '50000', commissionAmount: '80000' },
   account: { email: 'tuan@driver.local', displayName: 'Anh Tuấn' },
 };
 
@@ -81,7 +81,6 @@ before(async () => {
   admin = await signedIn('admin@number160.local');
   staff = await signedIn('staff@number160.local');
   manager = await signedIn('manager@number160.local');
-  assert.equal((await admin.post('/api/v1/merchant/settings', { vatPercent: '10' })).status, 200);
   ({ partner: hotel, agent: hotelAdmin } = await partnerWithAccount(HOTEL));
   ({ partner: driverPartner, agent: driver } = await partnerWithAccount(DRIVER));
 });
@@ -94,22 +93,21 @@ describe('@money referral redemption', () => {
   /** @type {string} */
   let code;
 
-  it('the §7.1 fixture: bill 2,600,000 gives exactly the stored amounts; Staff sees no commission', async () => {
+  it('bill 2,600,000: fixed 100,000 off, fixed 150,000 commission, no VAT; Staff sees no commission', async () => {
     code = await activated(hotel.qr.token);
     const res = await staff.post(`/api/v1/vouchers/${code}/redeem`, { grossAmount: '2600000' });
     assert.equal(res.status, 200);
     const shown = res.body.voucher;
     assert.deepEqual(
       { gross: shown.redemption.grossAmount, discount: shown.redemption.discountAmount, payable: shown.redemption.payableAmount },
-      { gross: '2600000.0000', discount: '182000.0000', payable: '2418000.0000' },
+      { gross: '2600000.0000', discount: '100000.0000', payable: '2500000.0000' },
     );
-    assert.doesNotMatch(JSON.stringify(res.body), /commission|175854|netNet|partner/i);
+    assert.doesNotMatch(JSON.stringify(res.body), /commission|150000|partner/i);
 
     const vouchers = await collection('vouchers');
     const stored = await vouchers.findOne({ code });
-    assert.equal(fromDecimal128(stored?.redemption.netNetCommissionBase), '2198181.8182');
-    assert.equal(fromDecimal128(stored?.redemption.vatAmount), '219818.1818');
-    assert.equal(fromDecimal128(stored?.redemption.vatRate), '0.1000');
+    assert.equal(stored?.redemption.vatRate, undefined);
+    assert.equal(stored?.redemption.netNetCommissionBase, undefined);
 
     const items = await (await collection('commissionItems')).find({ voucherId: stored?._id }).toArray();
     assert.equal(items.length, 1);
@@ -125,9 +123,9 @@ describe('@money referral redemption', () => {
       },
       {
         type: 'TENANT_TO_COMPANY',
-        rate: '0.0800',
-        base: '2198181.8182',
-        amount: '175854.5455',
+        rate: '0.0000',
+        base: '2500000.0000',
+        amount: '150000.0000',
         status: 'OPEN',
         partnerId: hotel.id,
         redemptionId: stored?.redemption.id,
@@ -135,16 +133,46 @@ describe('@money referral redemption', () => {
     );
   });
 
-  it('an independent individual gets TENANT_TO_INDEPENDENT_INDIVIDUAL on the same base rule', async () => {
+  it('an independent individual gets TENANT_TO_INDEPENDENT_INDIVIDUAL with its own fixed amounts', async () => {
     const driverCode = await activated(driverPartner.qr.token);
-    assert.equal((await staff.post(`/api/v1/vouchers/${driverCode}/redeem`, { grossAmount: '1000000' })).status, 200);
+    const res = await staff.post(`/api/v1/vouchers/${driverCode}/redeem`, { grossAmount: '1000000' });
+    assert.equal(res.body.voucher.redemption.payableAmount, '950000.0000');
     const vouchers = await collection('vouchers');
     const stored = await vouchers.findOne({ code: driverCode });
     const [item] = await (await collection('commissionItems')).find({ voucherId: stored?._id }).toArray();
     assert.equal(item.obligationType, 'TENANT_TO_INDEPENDENT_INDIVIDUAL');
-    // 1,000,000 − 5 % = 950,000; ÷ 1.1 = 863,636.3636; × 7 % = 60,454.5455
-    assert.equal(fromDecimal128(item.baseAmount), '863636.3636');
-    assert.equal(fromDecimal128(item.amount), '60454.5455');
+    assert.equal(fromDecimal128(item.baseAmount), '950000.0000');
+    assert.equal(fromDecimal128(item.amount), '80000.0000');
+  });
+
+  it('a percent voucher activated before phase 1 still redeems, commission on what the guest pays (no VAT)', async () => {
+    const legacyCode = await activated(hotel.qr.token);
+    const vouchers = await collection('vouchers');
+    await vouchers.updateOne(
+      { code: legacyCode },
+      {
+        $set: {
+          discountType: 'PERCENT',
+          discountValue: toDecimal128('0.0700'),
+          ruleSnapshot: {
+            relationshipKind: 'COMPANY',
+            totalBudgetRate: toDecimal128('0.1500'),
+            customerDiscountRate: toDecimal128('0.0700'),
+            companyCommissionRate: toDecimal128('0.0800'),
+            individualShareRate: toDecimal128('0.0000'),
+            companyNetCommissionRate: toDecimal128('0.0800'),
+            individualCommissionRate: null,
+          },
+        },
+      },
+    );
+    const res = await staff.post(`/api/v1/vouchers/${legacyCode}/redeem`, { grossAmount: '1100000' });
+    assert.equal(res.status, 200);
+    assert.equal(res.body.voucher.redemption.discountAmount, '77000.0000');
+    const stored = await vouchers.findOne({ code: legacyCode });
+    const [item] = await (await collection('commissionItems')).find({ voucherId: stored?._id }).toArray();
+    // 1,100,000 − 7 % = 1,023,000; × 8 % = 81,840
+    assert.equal(fromDecimal128(item.amount), '81840.0000');
   });
 
   it('two counters confirming at once: one success, one 409, one set of commission items', async () => {
@@ -178,8 +206,7 @@ describe('@money referral redemption', () => {
     assert.equal((await staff.post(`/api/v1/vouchers/${code}/redeem`, { grossAmount: '260000' })).status, 200);
     const open = await items.find({ voucherId: stored?._id, status: 'OPEN' }).toArray();
     assert.equal(open.length, 1);
-    // 260,000 − 18,200 = 241,800; ÷ 1.1 = 219,818.1818; × 8 % = 17,585.4545
-    assert.equal(fromDecimal128(open[0].amount), '17585.4545');
+    assert.equal(fromDecimal128(open[0].amount), '150000.0000');
     const audit = await collection('auditEvents');
     assert.equal(await audit.countDocuments({ eventType: 'REDEMPTION_VOIDED' }), 1);
   });
@@ -199,8 +226,8 @@ describe('@money @permission commission reports', () => {
     const list = await admin.get('/api/v1/partners');
     const row = list.body.partners.find((/** @type {any} */ p) => p.id === hotel.id);
     assert.equal(list.body.withCommission, true);
-    // Open: 17,585.4545 (re-redeemed fixture voucher) + racing voucher 500,000 → 465,000 ÷ 1.1 = 422,727.2727 × 8 % = 33,818.1818
-    assert.deepEqual(row.stats, { opens: 2, activations: 2, redemptions: 2, commissionOpen: '51403.6363' });
+    // Open: 150,000 (re-redeemed voucher) + 150,000 (racing voucher) + 81,840 (percent voucher)
+    assert.deepEqual(row.stats, { opens: 3, activations: 3, redemptions: 3, commissionOpen: '381840.0000', commissionPaid: '0.0000', lastPaidAt: null });
 
     const managerList = await manager.get('/api/v1/partners');
     const managerRow = managerList.body.partners.find((/** @type {any} */ p) => p.id === hotel.id);
@@ -214,14 +241,21 @@ describe('@money @permission commission reports', () => {
     assert.equal(res.body.partner.name, HOTEL.name);
     assert.equal(res.body.partner.merchantName, 'Number160');
     assert.equal(res.body.qr.token, hotel.qr.token);
-    assert.deepEqual(res.body.rule, { customerDiscountRate: '0.0700', commissionRate: '0.0800' });
-    assert.equal(res.body.stats.commissionOpen, '51403.6363');
-    assert.deepEqual(res.body.recent.map((/** @type {any} */ item) => item.status).sort(), ['OPEN', 'OPEN', 'VOID']);
+    assert.deepEqual(res.body.rule, {
+      pricingModel: 'FIXED_AMOUNT',
+      customerDiscountAmount: '100000.0000',
+      commissionAmount: '150000.0000',
+      customerDiscountRate: '0.0000',
+      commissionRate: null,
+    });
+    assert.equal(res.body.stats.commissionOpen, '381840.0000');
+    assert.deepEqual(res.body.recent.map((/** @type {any} */ item) => item.status).sort(), ['OPEN', 'OPEN', 'OPEN', 'VOID']);
+    assert.deepEqual(res.body.payouts, []);
     assert.doesNotMatch(JSON.stringify(res.body), /redeemedBy|customerName|payable|code/);
 
     const own = await driver.get('/api/v1/my/partner');
     assert.equal(own.body.partner.name, DRIVER.name);
-    assert.equal(own.body.stats.commissionOpen, '60454.5455');
+    assert.equal(own.body.stats.commissionOpen, '80000.0000');
     assert.equal(own.body.recent.length, 1);
   });
 
@@ -229,5 +263,51 @@ describe('@money @permission commission reports', () => {
     assert.equal((await staff.get('/api/v1/my/partner')).status, 403);
     assert.equal((await admin.get('/api/v1/my/partner')).status, 403);
     assert.equal((await hotelAdmin.get('/api/v1/partners')).status, 403);
+  });
+});
+
+describe('@money @permission mark commission as paid', () => {
+  it('only the Merchant admin of this merchant can record a payout', async () => {
+    assert.equal((await manager.post(`/api/v1/partners/${hotel.id}/payouts`, {})).status, 403);
+    assert.equal((await staff.post(`/api/v1/partners/${hotel.id}/payouts`, {})).status, 403);
+    assert.equal((await hotelAdmin.post(`/api/v1/partners/${hotel.id}/payouts`, {})).status, 403);
+    const other = await signedIn('admin@other.local');
+    assert.equal((await other.post(`/api/v1/partners/${hotel.id}/payouts`, {})).status, 404);
+  });
+
+  it('pays every unpaid item at once; the partner sees paid and unpaid; nothing left to pay afterwards', async () => {
+    const res = await admin.post(`/api/v1/partners/${hotel.id}/payouts`, { note: 'Bank transfer 30/09' });
+    assert.equal(res.status, 201);
+    assert.equal(res.body.payout.amount, '381840.0000');
+    assert.equal(res.body.payout.itemCount, 3);
+
+    const items = await collection('commissionItems');
+    const paid = await items.find({ partnerId: hotel.id, status: 'PAID' }).toArray();
+    assert.equal(paid.length, 3);
+    assert.ok(paid.every((item) => item.payoutId === res.body.payout.id && item.paidAt instanceof Date));
+
+    const row = (await admin.get('/api/v1/partners')).body.partners.find((/** @type {any} */ p) => p.id === hotel.id);
+    assert.equal(row.stats.commissionOpen, '0.0000');
+    assert.equal(row.stats.commissionPaid, '381840.0000');
+    assert.equal(row.stats.lastPaidAt, res.body.payout.paidAt);
+
+    const mine = await hotelAdmin.get('/api/v1/my/partner');
+    assert.deepEqual(mine.body.payouts.map((/** @type {any} */ p) => p.amount), ['381840.0000']);
+    assert.deepEqual(mine.body.recent.map((/** @type {any} */ item) => item.status).sort(), ['PAID', 'PAID', 'PAID', 'VOID']);
+
+    const again = await admin.post(`/api/v1/partners/${hotel.id}/payouts`, {});
+    assert.equal(again.status, 409);
+    assert.equal(again.body.error.code, 'NOTHING_TO_PAY');
+    const audit = await collection('auditEvents');
+    assert.equal(await audit.countDocuments({ eventType: 'COMMISSION_PAID', entityId: hotel.id }), 1);
+  });
+
+  it('a redemption whose commission is paid can no longer be voided', async () => {
+    const vouchers = await collection('vouchers');
+    const item = await (await collection('commissionItems')).findOne({ partnerId: hotel.id, status: 'PAID' });
+    const voucher = await vouchers.findOne({ _id: item?.voucherId });
+    const res = await manager.post(`/api/v1/vouchers/${voucher?.code}/void-redemption`, { reason: 'late' });
+    assert.equal(res.status, 409);
+    assert.equal(res.body.error.code, 'COMMISSION_PAID');
   });
 });

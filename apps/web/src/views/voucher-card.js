@@ -1,6 +1,9 @@
 import { formatVoucherCode } from '#domain';
+import { api } from '../api.js';
 import { esc } from '../dom.js';
-import { formatDateTime, t } from '../i18n.js';
+import { errorText, formatDateTime, t } from '../i18n.js';
+import { preparePhoto } from '../image.js';
+import { icon } from '../nav.js';
 import { discountText, downloadBlob, qrDataUrl, shareVoucher, termsText, voucherImage, voucherLink } from '../voucher-ui.js';
 
 /** @typedef {import('../voucher-ui.js').Voucher} Voucher */
@@ -95,6 +98,71 @@ export function bindVoucherActions(root, voucher) {
 }
 
 /**
+ * Optional bill photo: always offered, never required. The phone opens its camera or gallery.
+ * @param {string} id
+ */
+export function billPhotoField(id) {
+  return `
+    <div class="bill-photo">
+      <label class="btn btn-outline-secondary w-100" for="${id}">${icon('camera')}<span>${esc(t('billPhotoAdd'))}</span></label>
+      <input type="file" id="${id}" accept="image/*" hidden />
+      <p class="form-message small mt-1 mb-0" data-bill-status data-tone="info" role="status" aria-live="polite">${esc(t('billPhotoOptional'))}</p>
+    </div>`;
+}
+
+/**
+ * Uploads the picked bill photo to `path`; `onUploaded` gets the response.
+ * @param {ParentNode} root
+ * @param {string} id
+ * @param {string} path
+ * @param {(result: any) => void} [onUploaded]
+ */
+export function bindBillPhoto(root, id, path, onUploaded) {
+  const input = /** @type {HTMLInputElement} */ (root.querySelector(`#${id}`));
+  const status = /** @type {HTMLElement} */ (root.querySelector('[data-bill-status]'));
+  const label = /** @type {HTMLElement} */ (root.querySelector(`label[for="${id}"]`));
+  input.addEventListener('change', async () => {
+    const file = input.files?.[0];
+    if (!file) return;
+    label.classList.add('disabled');
+    status.dataset.tone = 'info';
+    status.textContent = t('billPhotoUploading');
+    try {
+      const result = await api('POST', path, await preparePhoto(file));
+      status.dataset.tone = 'success';
+      status.textContent = t('billPhotoAdded');
+      onUploaded?.(result);
+    } catch (error) {
+      status.dataset.tone = 'error';
+      status.textContent = errorText(error);
+    } finally {
+      label.classList.remove('disabled');
+      input.value = '';
+    }
+  });
+}
+
+/** @param {NonNullable<Voucher['billPhotos']>} photos */
+function billPhotoList(photos) {
+  if (!photos.length) return '';
+  return `
+    <section class="mt-3">
+      <h3 class="small fw-semibold mb-2">${esc(t('billPhotos'))}</h3>
+      <div class="bill-photos">
+        ${photos
+          .map(
+            (photo) => `
+          <a href="${esc(photo.url)}" target="_blank" rel="noopener">
+            <img src="${esc(photo.url)}" alt="${esc(t('billPhotos'))}" loading="lazy" />
+            <span>${esc(t(`billPhotoBy_${photo.addedBy}`))} · ${esc(formatDateTime(photo.addedAt))}</span>
+          </a>`,
+          )
+          .join('')}
+      </div>
+    </section>`;
+}
+
+/**
  * Voucher detail in a native dialog (Escape and the close button dismiss it).
  * @param {Voucher} voucher
  */
@@ -115,6 +183,7 @@ export function openVoucherDialog(voucher) {
       ${voucherCard(voucher, { showCustomer: true })}
       ${voucher.note ? `<p class="small text-muted mt-3 mb-0">${esc(t('note'))}: ${esc(voucher.note)}</p>` : ''}
       ${voucher.voidReason ? `<p class="small text-muted mt-1 mb-0">${esc(t('voidAction'))}: ${esc(voucher.voidReason)}</p>` : ''}
+      ${billPhotoList(voucher.billPhotos ?? [])}
       ${voucher.status === 'ACTIVE' ? voucherActions(voucher) : ''}
     </div>`;
   fillQr(dialog);

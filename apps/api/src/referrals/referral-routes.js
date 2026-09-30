@@ -1,4 +1,4 @@
-import { parseReferralToken, REFERRAL_VALIDITY_DAYS } from '#domain';
+import { isFixedRule, parseReferralToken, REFERRAL_VALIDITY_DAYS } from '#domain';
 import { randomUUID } from 'node:crypto';
 import { actorOf, recordAudit } from '../audit/audit.js';
 import { consume } from '../auth/rate-limit.js';
@@ -69,7 +69,8 @@ function referralView(partner, rule, merchantName, brand) {
     brand,
     partnerName: partner.name,
     partnerType: partner.partnerType,
-    discountRate: fromDecimal128(rule.customerDiscountRate),
+    discountRate: isFixedRule(rule) ? null : fromDecimal128(rule.customerDiscountRate),
+    discountAmount: isFixedRule(rule) ? fromDecimal128(rule.customerDiscountAmount) : null,
     validityDays: REFERRAL_VALIDITY_DAYS,
   };
 }
@@ -152,14 +153,15 @@ async function activateReferral(req, res, ctx) {
           { mediumId: medium._id, browserContextId: browser.id, result: 'VALID' },
           { session: tx, sort: { visitedAt: -1 }, projection: { _id: 1 } },
         );
+        const fixed = isFixedRule(rule);
         const voucher = {
           _id: randomUUID(),
           tenantId: medium.tenantId,
           code: newCodes(1)[0],
           source: 'REFERRAL',
           status: 'ACTIVE',
-          discountType: 'PERCENT',
-          discountValue: rule.customerDiscountRate,
+          discountType: fixed ? 'AMOUNT' : 'PERCENT',
+          discountValue: fixed ? rule.customerDiscountAmount : rule.customerDiscountRate,
           minBillAmount: null,
           validUntil: new Date(now.getTime() + REFERRAL_VALIDITY_DAYS * DAY_MS),
           customerName: null,
@@ -186,6 +188,7 @@ async function activateReferral(req, res, ctx) {
             individualShareRate: rule.individualShareRate ?? null,
             companyNetCommissionRate: rule.companyNetCommissionRate ?? null,
             individualCommissionRate: rule.individualCommissionRate ?? null,
+            ...(fixed ? { pricingModel: rule.pricingModel, customerDiscountAmount: rule.customerDiscountAmount, commissionAmount: rule.commissionAmount } : {}),
           },
         };
         const vouchers = await collection('vouchers');

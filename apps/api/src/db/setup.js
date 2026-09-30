@@ -9,7 +9,7 @@ import { closeClient, COLLECTIONS, getDb } from './mongo.js';
  * Bump when a validator or index changes. Changes must keep old documents valid
  * (add optional fields; backfill in a script before making a field required).
  */
-export const SCHEMA_VERSION = 7;
+export const SCHEMA_VERSION = 8;
 
 const DAY_SECONDS = 24 * 60 * 60;
 const uuid = { bsonType: 'string', pattern: '^[0-9a-f-]{36}$' };
@@ -404,6 +404,29 @@ const DEFINITIONS = {
       { key: { redemptionId: 1, obligationType: 1 }, name: 'redemption_obligation_uq', unique: true },
       { key: { tenantId: 1, partnerId: 1, status: 1 }, name: 'tenant_partner_status' },
       { key: { partnerId: 1, redeemedAt: -1 }, name: 'partner_redeemed' },
+    ],
+  },
+
+  // One "Mark as paid" by the merchant: all OPEN items of a partner at that moment became PAID with this id.
+  [COLLECTIONS.commissionPayouts]: {
+    schema: {
+      bsonType: 'object',
+      required: ['_id', 'tenantId', 'partnerId', 'amount', 'itemCount', 'paidBy', 'paidAt', 'createdAt'],
+      properties: {
+        _id: uuid,
+        tenantId: uuid,
+        partnerId: uuid,
+        amount: decimalField,
+        itemCount: { bsonType: 'int', minimum: 1 },
+        note: { bsonType: ['string', 'null'] },
+        paidBy: uuid,
+        paidAt: date,
+        createdAt: date,
+      },
+    },
+    indexes: [
+      { key: { partnerId: 1, paidAt: -1 }, name: 'partner_paid' },
+      { key: { tenantId: 1, paidAt: -1 }, name: 'tenant_paid' },
     ],
   },
 
