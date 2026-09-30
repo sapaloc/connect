@@ -25,6 +25,14 @@ function initials(name) {
 }
 
 /**
+ * A partner working with several merchants switches merchant, not role.
+ * @param {import('../api.js').Profile} profile
+ */
+export function switchLabel(profile) {
+  return profile.roles.every((option) => option.role === 'PARTNER_ADMIN' || option.role === 'REFERRER') ? 'switchMerchant' : 'switchRole';
+}
+
+/**
  * @param {NavItem} item
  * @param {string} current
  * @param {string} className
@@ -85,7 +93,7 @@ export function appLayout(app, current, { title, content }) {
           <div class="sb-actions">
             ${
               profile.roles.length > 1
-                ? `<a href="/select-role" data-nav class="sb-action" title="${esc(t('switchRole'))}">${icon('swap')}<span>${esc(t('switchRole'))}</span></a>`
+                ? `<a href="/select-role" data-nav class="sb-action" title="${esc(t(switchLabel(profile)))}">${icon('swap')}<span>${esc(t(switchLabel(profile)))}</span></a>`
                 : ''
             }
             <button type="button" class="sb-action" data-lang="${otherLang}" title="${esc(t('language'))}">

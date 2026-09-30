@@ -27,6 +27,7 @@ export const PERMISSIONS = Object.freeze({
   'commission.list': Object.freeze([PLATFORM_ADMIN, TENANT_ADMIN]),
   'commission.settle': Object.freeze([TENANT_ADMIN]),
   'commission.view_own': Object.freeze([PARTNER_ADMIN, REFERRER]),
+  'partner.profile_own': Object.freeze([PARTNER_ADMIN, REFERRER]),
 });
 
 /** @typedef {keyof typeof PERMISSIONS} Permission */

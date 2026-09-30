@@ -663,6 +663,13 @@ a.brand:hover {
   color: #2f8758;
 }
 
+.merchant-switch {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
 .pill-invited,
 .pill-onboarding,
 .pill-paused,

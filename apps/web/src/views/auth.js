@@ -10,6 +10,7 @@ import {
   passwordProblem,
   showMessage,
 } from './common.js';
+import { switchLabel } from './shell.js';
 
 /** @typedef {import('../main.js').App} App */
 
@@ -58,9 +59,10 @@ export function loginView(app) {
 /** @param {App} app */
 export function selectRoleView(app) {
   const profile = /** @type {import('../api.js').Profile} */ (app.state.profile);
+  const merchants = switchLabel(profile) === 'switchMerchant';
   app.root.innerHTML = authLayout({
-    title: t('chooseRoleTitle'),
-    subtitle: t('chooseRoleSubtitle'),
+    title: t(merchants ? 'chooseMerchantTitle' : 'chooseRoleTitle'),
+    subtitle: t(merchants ? 'chooseMerchantSubtitle' : 'chooseRoleSubtitle'),
     body: `
       <div class="d-grid gap-2">
         ${profile.roles
@@ -69,8 +71,8 @@ export function selectRoleView(app) {
           <button type="button" class="btn btn-outline-secondary btn-lg text-start role-option${
             option.roleAssignmentId === profile.activeRole?.roleAssignmentId ? ' active' : ''
           }" data-role="${esc(option.roleAssignmentId)}">
-            <span class="d-block fw-semibold">${esc(t(`role_${option.role}`))}</span>
-            ${option.tenantName ? `<span class="d-block small">${esc(option.tenantName)}</span>` : ''}
+            <span class="d-block fw-semibold">${esc(option.tenantName ?? t(`role_${option.role}`))}</span>
+            ${option.tenantName ? `<span class="d-block small">${esc(t(`role_${option.role}`))}</span>` : ''}
           </button>`,
           )
           .join('')}

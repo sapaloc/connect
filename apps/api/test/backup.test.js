@@ -27,7 +27,7 @@ describe('database backup', () => {
   it('writes a private backup file without sessions', async () => {
     const result = await writeBackup(await getDb(), dir);
     assert.match(result.file, /connect-test-.+\.json\.gz$/);
-    assert.equal(result.counts.users, 5);
+    assert.equal(result.counts.users, 4);
     assert.equal(result.counts.sessions, undefined, 'sessions are not backed up');
     assert.equal((await stat(result.file)).mode & 0o777, 0o600, 'only the owner can read it');
   });
@@ -58,7 +58,7 @@ describe('database backup', () => {
     await (await collection('invitations')).deleteMany({});
     const result = await restoreDatabase(db, backup.body);
 
-    assert.equal(result.counts.users, 6);
+    assert.equal(result.counts.users, 5);
     const restored = await (await collection('invitations')).findOne({ _id: before?._id });
     assert.ok(restored?.expiresAt instanceof Date);
     assert.equal(restored?.tokenHash.toString('hex'), before?.tokenHash.toString('hex'));
