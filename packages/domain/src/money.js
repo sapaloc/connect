@@ -158,7 +158,44 @@ export function commercialRuleFromPercents({ relationshipKind, totalBudgetPercen
 
 export const PRICING_MODELS = Object.freeze({
   FIXED_AMOUNT: 'FIXED_AMOUNT',
+  PERCENT: 'PERCENT',
 });
+
+/**
+ * Percent terms as the Merchant Admin types them: the guest gets `customerDiscountPercent` off the bill
+ * and the partner earns `commissionPercent` of what the guest pays. At most 2 decimals each; stored as
+ * a percent commercial rule (total budget = discount + commission, no individual share).
+ * @param {{ relationshipKind: unknown, customerDiscountPercent: unknown, commissionPercent: unknown }} input
+ * @returns {{ rule: CommercialRule | null, errors: string[] }}
+ */
+export function percentRuleFromPercents({ relationshipKind, customerDiscountPercent, commissionPercent }) {
+  if (relationshipKind !== RELATIONSHIP_KINDS.COMPANY && relationshipKind !== RELATIONSHIP_KINDS.INDEPENDENT_INDIVIDUAL) {
+    return { rule: null, errors: ['RELATIONSHIP_KIND_INVALID'] };
+  }
+  /** @type {string[]} */
+  const errors = [];
+  /** @param {unknown} value @param {string} code */
+  const percent = (value, code) => {
+    try {
+      const parsed = parseDecimal(value, code);
+      if (parsed.lte(0) || parsed.gt(100) || parsed.decimalPlaces() > 2) throw new Error();
+      return parsed;
+    } catch {
+      errors.push(`${code}_INVALID`);
+      return null;
+    }
+  };
+  const discount = percent(customerDiscountPercent, 'CUSTOMER_DISCOUNT_PERCENT');
+  const commission = percent(commissionPercent, 'COMMISSION_PERCENT');
+  if (!discount || !commission) return { rule: null, errors };
+  if (discount.plus(commission).gt(100)) return { rule: null, errors: ['TOTAL_PERCENT_ABOVE_100'] };
+  return commercialRuleFromPercents({
+    relationshipKind,
+    totalBudgetPercent: discount.plus(commission).toString(),
+    customerDiscountPercent: discount.toString(),
+    individualSharePercent: '0',
+  });
+}
 
 /** Upper bound of a fixed discount or commission, in VND. */
 export const MAX_FIXED_AMOUNT = '1000000000';

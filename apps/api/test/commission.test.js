@@ -175,6 +175,29 @@ describe('@money referral redemption', () => {
     assert.equal(fromDecimal128(item.amount), '81840.0000');
   });
 
+  it('percent terms set today: 10% off the bill, 15% of what the guest pays; switching back keeps the voucher terms', async () => {
+    const created = await admin.post('/api/v1/partners', {
+      name: 'Tài xế Phần Trăm',
+      relationshipKind: 'INDEPENDENT_INDIVIDUAL',
+      partnerType: 'DRIVER',
+      rule: { pricingModel: 'PERCENT', customerDiscountPercent: '10', commissionPercent: '15' },
+    });
+    assert.equal(created.status, 201);
+    const percentCode = await activated(created.body.partner.qr.token);
+    const path = `/api/v1/partners/${created.body.partner.id}/rule`;
+    assert.equal((await admin.post(path, { pricingModel: 'FIXED_AMOUNT', ...DRIVER.rule })).status, 200);
+
+    const res = await staff.post(`/api/v1/vouchers/${percentCode}/redeem`, { grossAmount: '1000000' });
+    assert.equal(res.status, 200);
+    assert.equal(res.body.voucher.redemption.discountAmount, '100000.0000');
+    assert.equal(res.body.voucher.redemption.payableAmount, '900000.0000');
+    const stored = await (await collection('vouchers')).findOne({ code: percentCode });
+    const [item] = await (await collection('commissionItems')).find({ voucherId: stored?._id }).toArray();
+    assert.equal(item.obligationType, 'TENANT_TO_INDEPENDENT_INDIVIDUAL');
+    // 1,000,000 − 10 % = 900,000; × 15 % = 135,000
+    assert.equal(fromDecimal128(item.amount), '135000.0000');
+  });
+
   it('two counters confirming at once: one success, one 409, one set of commission items', async () => {
     const racing = await activated(hotel.qr.token);
     const other = await signedIn('manager@number160.local');

@@ -1,4 +1,4 @@
-import { fixedRuleFromAmounts, isFixedRule, PARTNER_TYPES, toVnd } from '#domain';
+import { fixedRuleFromAmounts, isFixedRule, PARTNER_TYPES, percentRuleFromPercents, PRICING_MODELS, ratePercent, toVnd } from '#domain';
 import { api } from '../api.js';
 import { $, busy, esc, formValues } from '../dom.js';
 import { errorText, formatDateTime, formatVnd, getLang, t } from '../i18n.js';
@@ -13,7 +13,7 @@ import { messageSlot, showLink, showMessage } from './common.js';
  *   relationshipKind: 'COMPANY' | 'INDEPENDENT_INDIVIDUAL', partnerType: string,
  *   status: 'ACTIVE' | 'PAUSED' | 'ENDED', contactName: string | null, contactPhone: string | null,
  *   contactEmail: string | null, note: string | null, createdAt: string, endReason: string | null,
- *   rule: null | { version: number, pricingModel: 'FIXED_AMOUNT' | null, customerDiscountAmount: string | null,
+ *   rule: null | { version: number, pricingModel: 'FIXED_AMOUNT' | 'PERCENT', customerDiscountAmount: string | null,
  *     commissionAmount: string | null, totalBudgetRate: string, customerDiscountRate: string,
  *     companyCommissionRate: string | null, individualCommissionRate: string | null },
  *   accounts: { id: string, email: string, displayName: string, status: string, role: string }[],
@@ -38,6 +38,8 @@ function languageSelect(id) {
 }
 
 const AMOUNT_FIELDS = ['customerDiscountAmount', 'commissionAmount'];
+const PERCENT_FIELDS = ['customerDiscountPercent', 'commissionPercent'];
+const MODELS = [PRICING_MODELS.FIXED_AMOUNT, PRICING_MODELS.PERCENT];
 
 /** @param {string} value typed amount, with or without thousands separators */
 const digitsOf = (value) => value.replace(/\D/g, '');
@@ -45,27 +47,43 @@ const digitsOf = (value) => value.replace(/\D/g, '');
 /** @param {string} digits */
 const grouped = (digits) => (digits ? Number(digits).toLocaleString(getLang() === 'vi' ? 'vi-VN' : 'en-US') : '');
 
+/** @param {string} value typed percent; a comma works as the decimal point */
+const percentOf = (value) => value.replace(',', '.').replace(/[^\d.]/g, '');
+
 /**
- * Two fixed VND amounts: what the guest gets off and what the partner earns per bill.
+ * The partner's terms: a switch between fixed VND amounts per bill and percents, then the two values.
  * @param {string} prefix
- * @param {{ discount?: string, commission?: string }} [values] stored amounts
+ * @param {Partner['rule']} [rule] stored rule, to edit
  */
-function ruleFields(prefix, values = {}) {
-  const shown = (/** @type {string | undefined} */ amount) => (amount ? grouped(toVnd(amount)) : '');
+function ruleFields(prefix, rule = null) {
+  const model = rule && !isFixedRule(rule) ? PRICING_MODELS.PERCENT : PRICING_MODELS.FIXED_AMOUNT;
+  const amount = (/** @type {string | null | undefined} */ value) => (value && model === PRICING_MODELS.FIXED_AMOUNT ? grouped(toVnd(value)) : '');
+  const percent = (/** @type {string | null | undefined} */ rate) => (rate && model === PRICING_MODELS.PERCENT ? ratePercent(rate) : '');
+  const commissionRate = rule?.companyCommissionRate ?? rule?.individualCommissionRate;
+  /** @param {string} name @param {string} label @param {string} value @param {string} placeholder @param {string} mode */
+  const input = (name, label, value, placeholder, mode) => `
+      <div class="col-6">
+        <label for="${prefix}-${name}" class="form-label small">${esc(label)}</label>
+        <input id="${prefix}-${name}" name="${name}" class="form-control" inputmode="${mode}" maxlength="16" autocomplete="off"
+          value="${esc(value)}" placeholder="${placeholder}" />
+      </div>`;
   return `
-    <div class="row g-3">
-      <div class="col-6">
-        <label for="${prefix}-discount" class="form-label small">${esc(t('customerDiscountAmount'))}</label>
-        <input id="${prefix}-discount" name="customerDiscountAmount" class="form-control" inputmode="numeric" maxlength="16" autocomplete="off"
-          value="${esc(shown(values.discount))}" placeholder="100.000" required />
-      </div>
-      <div class="col-6">
-        <label for="${prefix}-commission" class="form-label small">${esc(t('commissionAmount'))}</label>
-        <input id="${prefix}-commission" name="commissionAmount" class="form-control" inputmode="numeric" maxlength="16" autocomplete="off"
-          value="${esc(shown(values.commission))}" placeholder="150.000" required />
-      </div>
+    <div class="btn-group w-100 mb-3" role="group" aria-label="${esc(t('pricingModel'))}">
+      ${MODELS.map(
+        (value) => `
+        <input type="radio" class="btn-check" name="pricingModel" id="${prefix}-model-${value}" value="${value}"${value === model ? ' checked' : ''} />
+        <label class="btn btn-outline-secondary" for="${prefix}-model-${value}">${esc(t(`pricingModel_${value}`))}</label>`,
+      ).join('')}
     </div>
-    <p class="rule-preview small mt-2 mb-0" id="${prefix}-preview" aria-live="polite">${esc(t('ruleHint'))}</p>`;
+    <div class="row g-3" data-model="${PRICING_MODELS.FIXED_AMOUNT}"${model === PRICING_MODELS.FIXED_AMOUNT ? '' : ' hidden'}>
+      ${input('customerDiscountAmount', t('customerDiscountAmount'), amount(rule?.customerDiscountAmount), '100.000', 'numeric')}
+      ${input('commissionAmount', t('commissionAmount'), amount(rule?.commissionAmount), '150.000', 'numeric')}
+    </div>
+    <div class="row g-3" data-model="${PRICING_MODELS.PERCENT}"${model === PRICING_MODELS.PERCENT ? '' : ' hidden'}>
+      ${input('customerDiscountPercent', t('customerDiscountPercent'), percent(rule?.customerDiscountRate), '10', 'decimal')}
+      ${input('commissionPercent', t('commissionPercent'), percent(commissionRate), '15', 'decimal')}
+    </div>
+    <p class="rule-preview small mt-2 mb-0" id="${prefix}-preview" aria-live="polite"></p>`;
 }
 
 /**
@@ -78,15 +96,25 @@ function bindRulePreview(form, prefix, kindOf) {
   const update = (/** @type {Event} [event] */ event) => {
     const input = /** @type {HTMLInputElement | undefined} */ (event?.target);
     if (input && AMOUNT_FIELDS.includes(input.name)) input.value = grouped(digitsOf(input.value));
-    const { customerDiscountAmount, commissionAmount } = rulePayload(form);
-    if (!customerDiscountAmount || !commissionAmount) {
-      preview.textContent = t('ruleHint');
+    if (input && PERCENT_FIELDS.includes(input.name)) input.value = percentOf(input.value);
+    const payload = rulePayload(form);
+    const percent = payload.pricingModel === PRICING_MODELS.PERCENT;
+    for (const group of form.querySelectorAll('[data-model]')) {
+      /** @type {HTMLElement} */ (group).hidden = group.getAttribute('data-model') !== payload.pricingModel;
+    }
+    const [discount, commission] = percent
+      ? [payload.customerDiscountPercent, payload.commissionPercent]
+      : [payload.customerDiscountAmount, payload.commissionAmount];
+    if (!discount || !commission) {
+      preview.textContent = t(percent ? 'ruleHintPercent' : 'ruleHint');
       preview.dataset.tone = 'info';
       return;
     }
-    const { rule, errors } = fixedRuleFromAmounts({ relationshipKind: kindOf(), customerDiscountAmount, commissionAmount });
+    const { rule, errors } = percent
+      ? percentRuleFromPercents({ relationshipKind: kindOf(), customerDiscountPercent: discount, commissionPercent: commission })
+      : fixedRuleFromAmounts({ relationshipKind: kindOf(), customerDiscountAmount: discount, commissionAmount: commission });
     if (rule) {
-      preview.textContent = t('rulePreview', ruleTerms(rule));
+      preview.textContent = t(percent ? 'rulePreviewPercent' : 'rulePreview', ruleTerms(rule));
       preview.dataset.tone = 'success';
     } else {
       preview.textContent = t(`rule_${errors[0]}`);
@@ -101,7 +129,18 @@ function bindRulePreview(form, prefix, kindOf) {
 /** @param {HTMLFormElement} form */
 function rulePayload(form) {
   const values = formValues(form);
-  return { customerDiscountAmount: digitsOf(values.customerDiscountAmount), commissionAmount: digitsOf(values.commissionAmount) };
+  if (values.pricingModel === PRICING_MODELS.PERCENT) {
+    return {
+      pricingModel: PRICING_MODELS.PERCENT,
+      customerDiscountPercent: percentOf(values.customerDiscountPercent),
+      commissionPercent: percentOf(values.commissionPercent),
+    };
+  }
+  return {
+    pricingModel: PRICING_MODELS.FIXED_AMOUNT,
+    customerDiscountAmount: digitsOf(values.customerDiscountAmount),
+    commissionAmount: digitsOf(values.commissionAmount),
+  };
 }
 
 /** @param {App} app */
@@ -365,7 +404,7 @@ function partnerCard(p, { manage, settle, showMerchant }) {
   const rule = p.rule
     ? `<span class="fw-semibold">${esc(t('ruleShort', ruleTerms(p.rule)))}</span>
        <span class="text-muted"> · ${esc(t('ruleVersion', { version: p.rule.version }))}</span>
-       ${isFixedRule(p.rule) ? '' : `<span class="d-block text-muted">${esc(t('ruleLegacy'))}</span>`}`
+       ${isFixedRule(p.rule) ? '' : `<span class="d-block text-muted">${esc(t('rulePercentNote'))}</span>`}`
     : '';
   const accounts = p.accounts.length
     ? p.accounts
@@ -524,7 +563,7 @@ export function mountPartners(app) {
       const rule = partner.rule;
       formDialog({
         title: t('editRuleTitle', { name: partner.name }),
-        body: `${ruleFields('d-rule', { discount: rule?.customerDiscountAmount ?? undefined, commission: rule?.commissionAmount ?? undefined })}
+        body: `${ruleFields('d-rule', rule)}
           <p class="small text-muted mt-3 mb-0">${esc(t('ruleChangeNote'))}</p>`,
         submit: t('saveBtn'),
         onReady: (form) => bindRulePreview(form, 'd-rule', () => partner.relationshipKind),
