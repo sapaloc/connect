@@ -202,7 +202,7 @@ describe('@money @permission redeeming at the counter', () => {
     assert.equal(res.body.voucher.status, 'REDEEMED');
     assert.deepEqual(
       { ...res.body.voucher.redemption, redeemedAt: undefined },
-      { grossAmount: '1000000.0000', discountAmount: '100000.0000', payableAmount: '900000.0000', redeemedAt: undefined },
+      { grossAmount: '1000000.0000', discountAmount: '100000.0000', payableAmount: '900000.0000', redeemedAt: undefined, confirmation: null },
     );
     const events = await collection('auditEvents');
     assert.equal(await events.countDocuments({ eventType: 'VOUCHER_REDEEMED' }), 1);

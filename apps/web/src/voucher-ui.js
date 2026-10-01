@@ -15,7 +15,8 @@ import { formatDate, formatVnd, t } from './i18n.js';
  *   note?: string | null,
  *   batchId?: string | null,
  *   createdAt?: string,
- *   redemption?: { grossAmount: string, discountAmount: string, payableAmount: string, redeemedAt: string } | null,
+ *   source?: 'DIRECT' | 'REFERRAL',
+ *   redemption?: { grossAmount: string, discountAmount: string, payableAmount: string, redeemedAt: string, confirmation?: 'GUEST' | 'UNCONFIRMED' | null } | null,
  *   voidReason?: string | null,
  *   brand?: Brand | null,
  *   billPhotos?: { id: string, addedBy: 'GUEST' | 'STAFF', addedAt: string, url: string }[],
@@ -91,6 +92,15 @@ export function qrDataUrl(code, size = 320) {
  */
 export function referralQrDataUrl(token, size = 320) {
   return QRCode.toDataURL(referralLink(token), { width: size, margin: 1, errorCorrectionLevel: 'M' });
+}
+
+/**
+ * QR the counter shows so a guest holding only a picture of the voucher opens the bill on their phone.
+ * @param {string} path e.g. /v/ABCD2345?confirm=<id>
+ * @param {number} [size]
+ */
+export function confirmQrDataUrl(path, size = 320) {
+  return QRCode.toDataURL(`${location.origin}${path}`, { width: size, margin: 1, errorCorrectionLevel: 'M' });
 }
 
 /** @param {string} src */

@@ -79,7 +79,7 @@ function snapshotRule(snapshot) {
  * @param {any} voucher
  * @param {unknown} grossAmount
  */
-function referralAmounts(voucher, grossAmount) {
+export function referralAmounts(voucher, grossAmount) {
   const snapshot = voucher.ruleSnapshot;
   try {
     if (isFixedRule(snapshot)) {
@@ -143,7 +143,7 @@ function escapeRegex(value) {
  * @param {Map<string, string>} [merchantNames]
  * @param {Map<string, any>} [brands] for the voucher card and share image in the console
  */
-function voucherView(voucher, now, merchantNames, brands) {
+export function voucherView(voucher, now, merchantNames, brands) {
   return {
     code: voucher.code,
     merchantId: voucher.tenantId,
@@ -165,6 +165,7 @@ function voucherView(voucher, now, merchantNames, brands) {
           discountAmount: fromDecimal128(voucher.redemption.discountAmount),
           payableAmount: fromDecimal128(voucher.redemption.payableAmount),
           redeemedAt: voucher.redemption.redeemedAt.toISOString(),
+          confirmation: voucher.redemption.confirmation?.method ?? null,
         }
       : null,
     voidedAt: voucher.voidedAt ? voucher.voidedAt.toISOString() : null,
@@ -179,7 +180,7 @@ function voucherView(voucher, now, merchantNames, brands) {
 }
 
 /** @param {any} voucher */
-function guestPhotoCount(voucher) {
+export function guestPhotoCount(voucher) {
   return (voucher.billPhotos ?? []).filter((/** @type {any} */ photo) => photo.addedBy === 'GUEST').length;
 }
 
@@ -194,6 +195,7 @@ export function publicView(voucher, merchantName, now, brand = null) {
     code: voucher.code,
     merchantName,
     brand,
+    source: voucher.source,
     status: effectiveVoucherStatus(voucher.status, voucher.validUntil, now),
     discountType: voucher.discountType,
     discountValue: fromDecimal128(voucher.discountValue),
@@ -409,7 +411,7 @@ async function counterVoucher(_req, res, ctx) {
  * @param {string} status effective status
  * @param {any} voucher
  */
-function notRedeemable(status, voucher) {
+export function notRedeemable(status, voucher) {
   if (status === 'REDEEMED') {
     return new HttpError(409, 'VOUCHER_ALREADY_REDEEMED', 'This voucher was already redeemed', {
       details: { redeemedAt: voucher.redemption?.redeemedAt?.toISOString() ?? null },
@@ -420,8 +422,80 @@ function notRedeemable(status, voucher) {
 }
 
 /**
- * Redeems once. The conditional update on status ACTIVE inside a transaction means two counters
- * confirming at the same time get one success and one 409 (VCH-04).
+ * Commission item documents of one redemption, OPEN.
+ * @param {any} voucher
+ * @param {string} redemptionId
+ * @param {{ obligationType: string, rate: string, baseAmount: string, amount: string }[]} items
+ * @param {Date} redeemedAt
+ * @param {Date} now
+ */
+export function commissionDocs(voucher, redemptionId, items, redeemedAt, now) {
+  return items.map((item) => ({
+    _id: randomUUID(),
+    tenantId: voucher.tenantId,
+    voucherId: voucher._id,
+    redemptionId,
+    partnerId: voucher.partnerId,
+    mediumId: voucher.mediumId ?? null,
+    ruleId: voucher.ruleSnapshot?.ruleId ?? null,
+    ruleVersion: voucher.ruleSnapshot?.version ?? null,
+    obligationType: item.obligationType,
+    rate: toDecimal128(item.rate),
+    baseAmount: toDecimal128(item.baseAmount),
+    amount: toDecimal128(item.amount),
+    status: 'OPEN',
+    redeemedAt,
+    createdAt: now,
+    voidedAt: null,
+    voidedBy: null,
+    voidReason: null,
+  }));
+}
+
+/**
+ * Marks the voucher REDEEMED and writes its OPEN commission items, inside the caller's transaction.
+ * The conditional update on status ACTIVE means two writers at the same time get one success and one
+ * 409 (VCH-04).
+ * @param {import('mongodb').ClientSession} tx
+ * @param {{
+ *   voucher: any,
+ *   amounts: { grossAmount: string, discountAmount: string, payableAmount: string },
+ *   commissionItems: { obligationType: string, rate: string, baseAmount: string, amount: string }[],
+ *   redeemedBy: string,
+ *   roleAssignmentId: string | null,
+ *   now: Date,
+ *   confirmation?: { id: string, method: 'GUEST' | 'UNCONFIRMED', at: Date } | null,
+ * }} input
+ */
+export async function applyRedemption(tx, { voucher, amounts, commissionItems, redeemedBy, roleAssignmentId, now, confirmation = null }) {
+  const redemptionId = randomUUID();
+  const redemption = {
+    id: redemptionId,
+    grossAmount: toDecimal128(amounts.grossAmount),
+    discountAmount: toDecimal128(amounts.discountAmount),
+    payableAmount: toDecimal128(amounts.payableAmount),
+    redeemedBy,
+    roleAssignmentId,
+    redeemedAt: now,
+    ...(confirmation ? { confirmation } : {}),
+  };
+  const vouchers = await collection('vouchers');
+  const result = await vouchers.updateOne(
+    { _id: voucher._id, status: 'ACTIVE', validUntil: { $gt: now } },
+    { $set: { status: 'REDEEMED', redemption } },
+    { session: tx },
+  );
+  if (result.modifiedCount !== 1) throw notRedeemable('REDEEMED', voucher);
+  if (commissionItems.length) {
+    const items = await collection('commissionItems');
+    await items.insertMany(commissionDocs(voucher, redemptionId, commissionItems, now, now), { session: tx });
+  }
+  return { redemptionId, redemption, redeemed: { ...voucher, status: 'REDEEMED', redemption } };
+}
+
+/**
+ * Redeems a direct voucher once. A referral voucher goes through the guest's confirmation instead
+ * (plan §0.9), so the commission cannot be created without the guest.
  * @type {import('../http/router.js').Handler}
  */
 async function redeemVoucher(req, res, ctx) {
@@ -437,68 +511,29 @@ async function redeemVoucher(req, res, ctx) {
     if (!voucher) throw new HttpError(404, 'VOUCHER_NOT_FOUND', 'Voucher not found');
     const status = effectiveVoucherStatus(voucher.status, voucher.validUntil, now);
     if (status !== 'ACTIVE') throw notRedeemable(status, voucher);
-
-    const redemptionId = randomUUID();
-    let amounts;
-    /** @type {import('#domain').RedemptionAmounts['commissionItems']} */
-    let commissionItems = [];
     if (voucher.source === 'REFERRAL') {
-      const { commissionItems: items, ...bill } = referralAmounts(voucher, body.grossAmount);
-      amounts = bill;
-      commissionItems = items;
-    } else {
-      try {
-        amounts = calculateDirectRedemption({
-          discountType: voucher.discountType,
-          discountValue: fromDecimal128(voucher.discountValue),
-          minBillAmount: voucher.minBillAmount ? fromDecimal128(voucher.minBillAmount) : null,
-          grossAmount: body.grossAmount,
-        });
-      } catch (error) {
-        throw moneyToHttp(error);
-      }
+      throw new HttpError(409, 'GUEST_CONFIRMATION_REQUIRED', 'A partner voucher is redeemed after the guest confirms the bill');
     }
-    const redemption = {
-      id: redemptionId,
-      grossAmount: toDecimal128(amounts.grossAmount),
-      discountAmount: toDecimal128(amounts.discountAmount),
-      payableAmount: toDecimal128(amounts.payableAmount),
+
+    let amounts;
+    try {
+      amounts = calculateDirectRedemption({
+        discountType: voucher.discountType,
+        discountValue: fromDecimal128(voucher.discountValue),
+        minBillAmount: voucher.minBillAmount ? fromDecimal128(voucher.minBillAmount) : null,
+        grossAmount: body.grossAmount,
+      });
+    } catch (error) {
+      throw moneyToHttp(error);
+    }
+    const done = await applyRedemption(tx, {
+      voucher,
+      amounts,
+      commissionItems: [],
       redeemedBy: session.userId,
       roleAssignmentId: session.roleAssignmentId,
-      redeemedAt: now,
-    };
-    const result = await vouchers.updateOne(
-      { _id: voucher._id, status: 'ACTIVE', validUntil: { $gt: now } },
-      { $set: { status: 'REDEEMED', redemption } },
-      { session: tx },
-    );
-    if (result.modifiedCount !== 1) throw notRedeemable('REDEEMED', voucher);
-    if (commissionItems.length) {
-      const items = await collection('commissionItems');
-      await items.insertMany(
-        commissionItems.map((item) => ({
-          _id: randomUUID(),
-          tenantId: voucher.tenantId,
-          voucherId: voucher._id,
-          redemptionId,
-          partnerId: voucher.partnerId,
-          mediumId: voucher.mediumId ?? null,
-          ruleId: voucher.ruleSnapshot.ruleId ?? null,
-          ruleVersion: voucher.ruleSnapshot.version ?? null,
-          obligationType: item.obligationType,
-          rate: toDecimal128(item.rate),
-          baseAmount: toDecimal128(item.baseAmount),
-          amount: toDecimal128(item.amount),
-          status: 'OPEN',
-          redeemedAt: now,
-          createdAt: now,
-          voidedAt: null,
-          voidedBy: null,
-          voidReason: null,
-        })),
-        { session: tx },
-      );
-    }
+      now,
+    });
     await recordAudit(
       {
         ...actorOf(ctx),
@@ -506,11 +541,11 @@ async function redeemVoucher(req, res, ctx) {
         entityType: 'voucher',
         entityId: voucher._id,
         before: { status: 'ACTIVE' },
-        after: { ...amounts, redemptionId, commissionItems },
+        after: { ...amounts, redemptionId: done.redemptionId, commissionItems: [] },
       },
       { session: tx },
     );
-    return { ...voucher, status: 'REDEEMED', redemption };
+    return done.redeemed;
   });
 
   sendJson(res, 200, { voucher: voucherView(redeemed, new Date(), await merchantNames([redeemed.tenantId])) });
@@ -554,6 +589,14 @@ async function voidRedemption(req, res, ctx) {
           { session: tx },
         )
       : { modifiedCount: 0 };
+    if (redemptionId) {
+      const reviews = await collection('commissionReviews');
+      await reviews.updateOne(
+        { redemptionId, status: 'PENDING' },
+        { $set: { status: 'CANCELLED', reviewedBy: session.userId, reviewedAt: now, reviewNote: reason } },
+        { session: tx },
+      );
+    }
     await recordAudit(
       {
         ...actorOf(ctx),

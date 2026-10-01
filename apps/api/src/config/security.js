@@ -36,6 +36,10 @@ export const RATE_LIMITS = Object.freeze({
   publicReferralIp: { max: 60, windowMs: 15 * MINUTE },
   referralActivateIp: { max: 20, windowMs: 15 * MINUTE },
   billPhotoIp: { max: 10, windowMs: 15 * MINUTE },
+  // The guest voucher page polls every 2 s while visible; guests often share the merchant's wifi IP.
+  confirmationPollBrowser: { max: 600, windowMs: 15 * MINUTE },
+  confirmationPollIp: { max: 6000, windowMs: 15 * MINUTE },
+  confirmationAnswerIp: { max: 60, windowMs: 15 * MINUTE },
 });
 
 /** scrypt cost: ~50 ms and 32 MiB per hash on a Vercel function. */

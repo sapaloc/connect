@@ -147,14 +147,17 @@ describe('anonymous activation', () => {
     assert.notEqual(res.body.voucher.code, code);
   });
 
-  it('the counter looks the voucher up and redeems it like a direct one', async () => {
+  it('the counter looks the voucher up, sends the bill and the guest confirms on the same phone', async () => {
     const staff = await signedIn('staff@number160.local');
     const found = await staff.get(`/api/v1/vouchers/${code}`);
     assert.equal(found.status, 200);
     assert.equal(found.body.voucher.source, 'REFERRAL');
-    const res = await staff.post(`/api/v1/vouchers/${code}/redeem`, { grossAmount: '2600000' });
+    const sent = await staff.post(`/api/v1/vouchers/${code}/confirmations`, { grossAmount: '2600000' });
+    assert.equal(sent.status, 201);
+    assert.equal(sent.body.confirmation.payableAmount, '2500000.0000');
+    const res = await phone.post(`/api/v1/public/confirmations/${sent.body.confirmation.id}/confirm`);
     assert.equal(res.status, 200);
-    assert.equal(res.body.voucher.redemption.payableAmount, '2500000.0000');
+    assert.equal(res.body.voucher.status, 'REDEEMED');
   });
 
   it('a new rule version applies to new activations only', async () => {
