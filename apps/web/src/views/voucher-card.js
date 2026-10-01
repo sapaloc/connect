@@ -70,6 +70,14 @@ export async function fillQr(root) {
  * @param {Voucher} voucher
  */
 export function voucherActions(voucher) {
+  if (voucher.source === 'REFERRAL') {
+    return `
+    <div class="vcard-actions">
+      <button type="button" class="btn btn-primary" data-vdownload>${esc(t('saveImage'))}</button>
+    </div>
+    <p class="small text-muted mt-2 mb-0">${esc(t('referralKeepPage'))}</p>
+    <p class="small text-muted mt-2 mb-0" data-vmessage role="status" aria-live="polite"></p>`;
+  }
   return `
     <div class="vcard-actions">
       <button type="button" class="btn btn-primary" data-vshare>${esc(t('share'))}</button>
@@ -98,15 +106,17 @@ export function bindVoucherActions(root, voucher) {
 }
 
 /**
- * Optional bill photo: always offered, never required. The phone opens its camera or gallery.
+ * Bill photo picker; optional except when recording a partner voucher the guest could not confirm.
+ * The phone opens its camera or gallery.
  * @param {string} id
+ * @param {string} [hint]
  */
-export function billPhotoField(id) {
+export function billPhotoField(id, hint = t('billPhotoOptional')) {
   return `
     <div class="bill-photo">
       <label class="btn btn-outline-secondary w-100" for="${id}">${icon('camera')}<span>${esc(t('billPhotoAdd'))}</span></label>
       <input type="file" id="${id}" accept="image/*" hidden />
-      <p class="form-message small mt-1 mb-0" data-bill-status data-tone="info" role="status" aria-live="polite">${esc(t('billPhotoOptional'))}</p>
+      <p class="form-message small mt-1 mb-0" data-bill-status data-tone="info" role="status" aria-live="polite">${esc(hint)}</p>
     </div>`;
 }
 
@@ -143,7 +153,7 @@ export function bindBillPhoto(root, id, path, onUploaded) {
 }
 
 /** @param {NonNullable<Voucher['billPhotos']>} photos */
-function billPhotoList(photos) {
+export function billPhotoList(photos) {
   if (!photos.length) return '';
   return `
     <section class="mt-3">
@@ -183,6 +193,7 @@ export function openVoucherDialog(voucher) {
       ${voucherCard(voucher, { showCustomer: true })}
       ${voucher.note ? `<p class="small text-muted mt-3 mb-0">${esc(t('note'))}: ${esc(voucher.note)}</p>` : ''}
       ${voucher.voidReason ? `<p class="small text-muted mt-1 mb-0">${esc(t('voidAction'))}: ${esc(voucher.voidReason)}</p>` : ''}
+      ${voucher.redemption?.confirmation === 'UNCONFIRMED' ? `<p class="small fw-semibold mt-2 mb-0">${esc(t('redeemUnconfirmed'))}</p>` : ''}
       ${billPhotoList(voucher.billPhotos ?? [])}
       ${voucher.status === 'ACTIVE' ? voucherActions(voucher) : ''}
     </div>`;

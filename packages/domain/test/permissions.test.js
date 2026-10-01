@@ -30,6 +30,7 @@ const EXPECTED = {
     'voucher.void',
     'commission.list',
     'commission.settle',
+    'commission.review',
   ],
   MANAGER: [
     'surface.console',

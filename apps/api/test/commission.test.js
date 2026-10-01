@@ -64,13 +64,31 @@ async function partnerWithAccount(body) {
   return { partner: res.body.partner, agent: await signedIn(body.account.email, NEW_PASSWORD) };
 }
 
+/** @type {Map<string, Agent>} the guest phone that took each voucher */
+const phones = new Map();
+
 /** A customer taps the partner QR and gets a voucher code. @param {string} token */
 async function activated(token) {
   const phone = new Agent(server.baseUrl);
   await phone.get(`/api/v1/public/referrals/${token}`);
   const res = await phone.post(`/api/v1/public/referrals/${token}/activate`);
   assert.equal(res.status, 201);
+  phones.set(res.body.voucher.code, phone);
   return /** @type {string} */ (res.body.voucher.code);
+}
+
+/**
+ * Counter sends the bill, the guest confirms on the phone that took the voucher.
+ * @param {Agent} counter @param {string} code @param {string} grossAmount
+ */
+async function redeemReferral(counter, code, grossAmount) {
+  const sent = await counter.post(`/api/v1/vouchers/${code}/confirmations`, { grossAmount });
+  assert.equal(sent.status, 201, JSON.stringify(sent.body));
+  const confirmed = await /** @type {Agent} */ (phones.get(code)).post(`/api/v1/public/confirmations/${sent.body.confirmation.id}/confirm`);
+  assert.equal(confirmed.status, 200, JSON.stringify(confirmed.body));
+  const res = await counter.get(`/api/v1/confirmations/${sent.body.confirmation.id}`);
+  assert.equal(res.body.confirmation.status, 'CONFIRMED');
+  return { status: res.status, body: { voucher: res.body.confirmation.voucher } };
 }
 
 before(async () => {
@@ -95,7 +113,7 @@ describe('@money referral redemption', () => {
 
   it('bill 2,600,000: fixed 100,000 off, fixed 150,000 commission, no VAT; Staff sees no commission', async () => {
     code = await activated(hotel.qr.token);
-    const res = await staff.post(`/api/v1/vouchers/${code}/redeem`, { grossAmount: '2600000' });
+    const res = await redeemReferral(staff, code, '2600000');
     assert.equal(res.status, 200);
     const shown = res.body.voucher;
     assert.deepEqual(
@@ -135,7 +153,7 @@ describe('@money referral redemption', () => {
 
   it('an independent individual gets TENANT_TO_INDEPENDENT_INDIVIDUAL with its own fixed amounts', async () => {
     const driverCode = await activated(driverPartner.qr.token);
-    const res = await staff.post(`/api/v1/vouchers/${driverCode}/redeem`, { grossAmount: '1000000' });
+    const res = await redeemReferral(staff, driverCode, '1000000');
     assert.equal(res.body.voucher.redemption.payableAmount, '950000.0000');
     const vouchers = await collection('vouchers');
     const stored = await vouchers.findOne({ code: driverCode });
@@ -166,7 +184,7 @@ describe('@money referral redemption', () => {
         },
       },
     );
-    const res = await staff.post(`/api/v1/vouchers/${legacyCode}/redeem`, { grossAmount: '1100000' });
+    const res = await redeemReferral(staff, legacyCode, '1100000');
     assert.equal(res.status, 200);
     assert.equal(res.body.voucher.redemption.discountAmount, '77000.0000');
     const stored = await vouchers.findOne({ code: legacyCode });
@@ -187,7 +205,7 @@ describe('@money referral redemption', () => {
     const path = `/api/v1/partners/${created.body.partner.id}/rule`;
     assert.equal((await admin.post(path, { pricingModel: 'FIXED_AMOUNT', ...DRIVER.rule })).status, 200);
 
-    const res = await staff.post(`/api/v1/vouchers/${percentCode}/redeem`, { grossAmount: '1000000' });
+    const res = await redeemReferral(staff, percentCode, '1000000');
     assert.equal(res.status, 200);
     assert.equal(res.body.voucher.redemption.discountAmount, '100000.0000');
     assert.equal(res.body.voucher.redemption.payableAmount, '900000.0000');
@@ -198,13 +216,15 @@ describe('@money referral redemption', () => {
     assert.equal(fromDecimal128(item.amount), '135000.0000');
   });
 
-  it('two counters confirming at once: one success, one 409, one set of commission items', async () => {
+  it('no direct redeem for a partner voucher; the guest confirming twice at once: one success, one set of items', async () => {
     const racing = await activated(hotel.qr.token);
-    const other = await signedIn('manager@number160.local');
-    const results = await Promise.all([
-      staff.post(`/api/v1/vouchers/${racing}/redeem`, { grossAmount: '500000' }),
-      other.post(`/api/v1/vouchers/${racing}/redeem`, { grossAmount: '500000' }),
-    ]);
+    const direct = await staff.post(`/api/v1/vouchers/${racing}/redeem`, { grossAmount: '500000' });
+    assert.equal(direct.status, 409);
+    assert.equal(direct.body.error.code, 'GUEST_CONFIRMATION_REQUIRED');
+    const sent = await staff.post(`/api/v1/vouchers/${racing}/confirmations`, { grossAmount: '500000' });
+    const phone = /** @type {Agent} */ (phones.get(racing));
+    const path = `/api/v1/public/confirmations/${sent.body.confirmation.id}/confirm`;
+    const results = await Promise.all([phone.post(path), phone.post(path)]);
     assert.deepEqual(results.map((res) => res.status).sort(), [200, 409]);
     const vouchers = await collection('vouchers');
     const stored = await vouchers.findOne({ code: racing });
@@ -226,7 +246,7 @@ describe('@money referral redemption', () => {
     assert.equal(stored?.voidedRedemptions.length, 1);
     assert.equal((await manager.post(`/api/v1/vouchers/${code}/void-redemption`, { reason: 'again' })).status, 409);
 
-    assert.equal((await staff.post(`/api/v1/vouchers/${code}/redeem`, { grossAmount: '260000' })).status, 200);
+    assert.equal((await redeemReferral(staff, code, '260000')).status, 200);
     const open = await items.find({ voucherId: stored?._id, status: 'OPEN' }).toArray();
     assert.equal(open.length, 1);
     assert.equal(fromDecimal128(open[0].amount), '150000.0000');
@@ -250,7 +270,7 @@ describe('@money @permission commission reports', () => {
     const row = list.body.partners.find((/** @type {any} */ p) => p.id === hotel.id);
     assert.equal(list.body.withCommission, true);
     // Open: 150,000 (re-redeemed voucher) + 150,000 (racing voucher) + 81,840 (percent voucher)
-    assert.deepEqual(row.stats, { opens: 3, activations: 3, redemptions: 3, commissionOpen: '381840.0000', commissionPaid: '0.0000', lastPaidAt: null });
+    assert.deepEqual(row.stats, { opens: 3, activations: 3, redemptions: 3, commissionOpen: '381840.0000', commissionPaid: '0.0000', commissionPending: '0.0000', pendingReviews: 0, lastPaidAt: null });
 
     const managerList = await manager.get('/api/v1/partners');
     const managerRow = managerList.body.partners.find((/** @type {any} */ p) => p.id === hotel.id);

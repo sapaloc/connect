@@ -1083,6 +1083,38 @@ a.brand:hover {
   color: #2f8758;
 }
 
+.redeem-step {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--sw-ink);
+}
+
+.confirm-qr {
+  display: flex;
+  justify-content: center;
+  margin: 8px 0;
+}
+
+.confirm-qr img {
+  width: 200px;
+  height: 200px;
+  border: 1px solid var(--sw-line);
+  border-radius: 12px;
+  background: #fff;
+}
+
+.guest-confirm {
+  padding: 16px;
+  border: 2px solid var(--sw-acc);
+  border-radius: 16px;
+  background: var(--sw-card);
+}
+
+.review-item {
+  padding: 12px 0;
+  border-top: 1px solid var(--sw-line);
+}
+
 .amounts {
   margin: 0 0 16px;
   text-align: left;

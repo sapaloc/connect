@@ -5,7 +5,9 @@ import { userRoutes } from '../foundation/user-routes.js';
 import { merchantRoutes } from '../merchants/merchant-routes.js';
 import { myRoutes } from '../partners/my-routes.js';
 import { partnerRoutes } from '../partners/partner-routes.js';
+import { reviewRoutes } from '../partners/review-routes.js';
 import { referralRoutes } from '../referrals/referral-routes.js';
+import { confirmationRoutes } from '../vouchers/confirmation-routes.js';
 import { voucherRoutes } from '../vouchers/voucher-routes.js';
 
 /**
@@ -25,6 +27,8 @@ const definitions = [
   ...myRoutes,
   ...fileRoutes,
   ...voucherRoutes,
+  ...confirmationRoutes,
+  ...reviewRoutes,
 ];
 
 const routes = definitions.map(({ method, path, handler }) => {

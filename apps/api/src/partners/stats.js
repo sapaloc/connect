@@ -7,7 +7,7 @@ export const MERCHANT_PAYS = ['TENANT_TO_COMPANY', 'TENANT_TO_INDEPENDENT_INDIVI
 /**
  * @typedef {{
  *   opens: number, activations: number, redemptions: number,
- *   commissionOpen?: string, commissionPaid?: string, lastPaidAt?: string | null,
+ *   commissionOpen?: string, commissionPaid?: string, commissionPending?: string, pendingReviews?: number, lastPaidAt?: string | null,
  * }} PartnerStats
  */
 
@@ -28,7 +28,12 @@ export async function partnerStats(partnerIds, { withCommission }) {
   const stats = new Map(
     partnerIds.map((id) => [
       id,
-      { opens: 0, activations: 0, redemptions: 0, ...(withCommission ? { commissionOpen: '0.0000', commissionPaid: '0.0000', lastPaidAt: null } : {}) },
+      {
+        opens: 0,
+        activations: 0,
+        redemptions: 0,
+        ...(withCommission ? { commissionOpen: '0.0000', commissionPaid: '0.0000', commissionPending: '0.0000', pendingReviews: 0, lastPaidAt: null } : {}),
+      },
     ]),
   );
   if (!partnerIds.length) return stats;
@@ -60,6 +65,13 @@ export async function partnerStats(partnerIds, { withCommission }) {
       const entry = /** @type {PartnerStats} */ (stats.get(row._id.partnerId));
       if (row._id.status === 'OPEN') entry.commissionOpen = fromDecimal128(row.amount);
       else entry.commissionPaid = fromDecimal128(row.amount);
+    }
+    const reviews = await collection('commissionReviews');
+    const pending = await reviews
+      .aggregate([{ $match: { ...match, status: 'PENDING' } }, { $group: { _id: '$partnerId', amount: { $sum: '$amount' }, n: { $sum: 1 } } }])
+      .toArray();
+    for (const row of pending) {
+      Object.assign(/** @type {PartnerStats} */ (stats.get(row._id)), { commissionPending: fromDecimal128(row.amount), pendingReviews: row.n });
     }
     const payouts = await collection('commissionPayouts');
     for (const row of await payouts.aggregate([{ $match: match }, { $group: { _id: '$partnerId', last: { $max: '$paidAt' } } }]).toArray()) {

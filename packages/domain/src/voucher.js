@@ -27,6 +27,33 @@ export function parseVoucherCode(input) {
 /** A referral voucher is valid 7 × 24 h from activation (plan §9.6). */
 export const REFERRAL_VALIDITY_DAYS = 7;
 
+/** How long the guest has to confirm the bill of a referral voucher on their phone (plan §0.9). */
+export const GUEST_CONFIRMATION_MINUTES = 5;
+/** Counter and guest page ask for the confirmation status this often while one is pending. */
+export const CONFIRMATION_POLL_MS = 2000;
+
+export const CONFIRMATION_STATUSES = Object.freeze({
+  PENDING: 'PENDING',
+  CONFIRMED: 'CONFIRMED',
+  DECLINED: 'DECLINED',
+  EXPIRED: 'EXPIRED',
+  CANCELLED: 'CANCELLED',
+  FALLBACK: 'FALLBACK',
+});
+
+/** Why staff recorded a referral redemption without the guest's confirmation. */
+export const FALLBACK_REASONS = Object.freeze(['NEW_PHONE', 'NO_INTERNET', 'PASSED_ON', 'NO_RESPONSE', 'OTHER']);
+
+/**
+ * Status a confirmation request shows: a PENDING one past its end is EXPIRED, without a write.
+ * @param {string} status
+ * @param {Date} expiresAt
+ * @param {Date} [now]
+ */
+export function effectiveConfirmationStatus(status, expiresAt, now = new Date()) {
+  return status === CONFIRMATION_STATUSES.PENDING && expiresAt <= now ? CONFIRMATION_STATUSES.EXPIRED : status;
+}
+
 /** Opaque public token of a partner QR: 16 random bytes, base64url. */
 export const REFERRAL_TOKEN_PATTERN = /^[A-Za-z0-9_-]{22}$/;
 
