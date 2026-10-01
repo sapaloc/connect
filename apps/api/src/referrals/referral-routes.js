@@ -1,7 +1,8 @@
-import { isFixedRule, parseReferralToken, REFERRAL_VALIDITY_DAYS } from '#domain';
+import { isFixedRule, parseReferralToken, REFERRAL_VALIDITY_DAYS, ROLES } from '#domain';
 import { randomUUID } from 'node:crypto';
 import { actorOf, recordAudit } from '../audit/audit.js';
 import { consume } from '../auth/rate-limit.js';
+import { loadSession } from '../auth/session.js';
 import { RATE_LIMITS } from '../config/security.js';
 import { fromDecimal128 } from '../db/decimal.js';
 import { collection } from '../db/mongo.js';
@@ -16,16 +17,44 @@ import { newCodes, publicView } from '../vouchers/voucher-routes.js';
 const DAY_MS = 24 * 60 * 60 * 1000;
 const BROWSER_COOKIE = 'mc_bc';
 const BROWSER_COOKIE_MAX_AGE = 400 * 24 * 60 * 60;
+const MERCHANT_ROLES = [ROLES.TENANT_ADMIN, ROLES.MANAGER, ROLES.STAFF];
 /** `createdBy` of vouchers activated anonymously from a partner QR (no user account). */
 export const PUBLIC_ACTOR_ID = '00000000-0000-4000-8000-000000000000';
+
+/**
+ * The anonymous browser id already set on this browser, or null. Never creates one.
+ * @param {import('node:http').IncomingMessage} req
+ */
+export function browserIdOf(req) {
+  const current = parseCookies(req.headers.cookie)[BROWSER_COOKIE];
+  return current && UUID_PATTERN.test(current) ? current.toLowerCase() : null;
+}
+
+/**
+ * A browser signed in to a merchant-side role (Admin, Manager, Staff) of this merchant: such a browser
+ * may not take or confirm a partner voucher, or staff could confirm their own bill (plan §0.9).
+ * @param {import('node:http').IncomingMessage} req
+ * @param {string} tenantId
+ */
+export async function isMerchantBrowser(req, tenantId) {
+  return isMerchantSession(await loadSession(req), tenantId);
+}
+
+/**
+ * @param {import('../auth/session.js').Session | null} session
+ * @param {string} tenantId
+ */
+function isMerchantSession(session, tenantId) {
+  return Boolean(session && MERCHANT_ROLES.includes(session.role) && session.tenantId === tenantId);
+}
 
 /**
  * The anonymous browser id (plan §9.6): the same browser opening the same QR gets the same voucher back.
  * @param {import('node:http').IncomingMessage} req
  */
 function browserContext(req) {
-  const current = parseCookies(req.headers.cookie)[BROWSER_COOKIE];
-  if (current && UUID_PATTERN.test(current)) return { id: current, header: {} };
+  const current = browserIdOf(req);
+  if (current) return { id: current, header: {} };
   const id = randomUUID();
   return { id, header: { 'Set-Cookie': serializeCookie(BROWSER_COOKIE, id, BROWSER_COOKIE_MAX_AGE) } };
 }
@@ -134,6 +163,7 @@ async function activateReferral(req, res, ctx) {
   await consume(`referral-activate:${clientIp(req)}`, RATE_LIMITS.referralActivateIp);
   const token = parseReferralToken(ctx.params.token);
   const browser = browserContext(req);
+  const signedIn = await loadSession(req);
 
   for (let attempt = 1; ; attempt++) {
     try {
@@ -142,6 +172,9 @@ async function activateReferral(req, res, ctx) {
         const found = await resolve(token, tx);
         if (found.result !== 'VALID') throw refusal(found.result);
         const { medium, partner, rule } = found;
+        if (isMerchantSession(signedIn, medium.tenantId)) {
+          throw new HttpError(403, 'REFERRAL_MERCHANT_BROWSER', 'Merchant staff cannot take a partner voucher; the guest takes it on their own phone');
+        }
         const referralMedia = await collection('referralMedia');
         await referralMedia.updateOne({ _id: medium._id }, { $set: { lastActivationAt: now } }, { session: tx });
 

@@ -17,6 +17,8 @@ export const COLLECTIONS = Object.freeze({
   commissionItems: 'commission_items',
   commissionPayouts: 'commission_payouts',
   fileAssets: 'file_assets',
+  redemptionConfirmations: 'redemption_confirmations',
+  commissionReviews: 'commission_reviews',
   schemaVersions: 'schema_versions',
 });
 

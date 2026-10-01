@@ -114,6 +114,7 @@ export async function mountMy(app) {
         ${kpi(t('kpiRedemptions'), stats.redemptions)}
         ${kpi(t('commissionOwed'), formatVnd(stats.commissionOpen))}
         ${kpi(t('commissionPaid'), formatVnd(stats.commissionPaid))}
+        ${stats.pendingReviews ? kpi(t('commissionPending'), formatVnd(stats.commissionPending)) : ''}
       </section>
 
       <section class="card-sw">

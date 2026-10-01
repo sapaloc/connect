@@ -9,7 +9,7 @@ import { closeClient, COLLECTIONS, getDb } from './mongo.js';
  * Bump when a validator or index changes. Changes must keep old documents valid
  * (add optional fields; backfill in a script before making a field required).
  */
-export const SCHEMA_VERSION = 8;
+export const SCHEMA_VERSION = 9;
 
 const DAY_SECONDS = 24 * 60 * 60;
 const uuid = { bsonType: 'string', pattern: '^[0-9a-f-]{36}$' };
@@ -460,6 +460,78 @@ const DEFINITIONS = {
         partialFilterExpression: { assetType: 'BRAND_LOGO', status: 'ACTIVE' },
       },
       { key: { tenantId: 1, assetType: 1, status: 1 }, name: 'tenant_type_status' },
+    ],
+  },
+
+  // Counter asks the guest to confirm the bill of a referral voucher (plan §0.9). Amounts are locked here.
+  [COLLECTIONS.redemptionConfirmations]: {
+    schema: {
+      bsonType: 'object',
+      required: ['_id', 'tenantId', 'voucherId', 'code', 'browserContextId', 'grossAmount', 'discountAmount', 'payableAmount', 'status', 'requestedBy', 'createdAt', 'expiresAt'],
+      properties: {
+        _id: uuid,
+        tenantId: uuid,
+        voucherId: uuid,
+        code: { bsonType: 'string', pattern: '^[A-HJ-NP-Z2-9]{8}$' },
+        browserContextId: uuid,
+        grossAmount: decimalField,
+        discountAmount: decimalField,
+        payableAmount: decimalField,
+        status: { enum: ['PENDING', 'CONFIRMED', 'DECLINED', 'EXPIRED', 'CANCELLED', 'FALLBACK'] },
+        requestedBy: uuid,
+        roleAssignmentId: nullableUuid,
+        createdAt: date,
+        expiresAt: date,
+        resolvedAt: nullableDate,
+        redemptionId: nullableUuid,
+        fallbackReason: { bsonType: ['string', 'null'] },
+      },
+    },
+    indexes: [
+      { key: { voucherId: 1 }, name: 'voucher_pending_uq', unique: true, partialFilterExpression: { status: 'PENDING' } },
+      { key: { browserContextId: 1, status: 1 }, name: 'browser_status' },
+      { key: { tenantId: 1, createdAt: -1 }, name: 'tenant_created' },
+    ],
+  },
+
+  // Commission of a redemption the guest could not confirm: held until the Merchant admin decides.
+  [COLLECTIONS.commissionReviews]: {
+    schema: {
+      bsonType: 'object',
+      required: ['_id', 'tenantId', 'voucherId', 'redemptionId', 'partnerId', 'items', 'amount', 'reason', 'requestedBy', 'status', 'createdAt'],
+      properties: {
+        _id: uuid,
+        tenantId: uuid,
+        voucherId: uuid,
+        redemptionId: uuid,
+        confirmationId: nullableUuid,
+        partnerId: uuid,
+        items: {
+          bsonType: 'array',
+          items: {
+            bsonType: 'object',
+            required: ['obligationType', 'rate', 'baseAmount', 'amount'],
+            properties: {
+              obligationType: { enum: ['TENANT_TO_COMPANY', 'COMPANY_TO_AFFILIATED_INDIVIDUAL', 'TENANT_TO_INDEPENDENT_INDIVIDUAL'] },
+              rate: decimalField,
+              baseAmount: decimalField,
+              amount: decimalField,
+            },
+          },
+        },
+        amount: decimalField,
+        reason: { enum: ['NEW_PHONE', 'NO_INTERNET', 'PASSED_ON', 'NO_RESPONSE', 'OTHER'] },
+        requestedBy: uuid,
+        status: { enum: ['PENDING', 'APPROVED', 'REJECTED', 'CANCELLED'] },
+        createdAt: date,
+        reviewedBy: nullableUuid,
+        reviewedAt: nullableDate,
+        reviewNote: { bsonType: ['string', 'null'] },
+      },
+    },
+    indexes: [
+      { key: { redemptionId: 1 }, name: 'redemption_uq', unique: true },
+      { key: { tenantId: 1, partnerId: 1, status: 1 }, name: 'tenant_partner_status' },
     ],
   },
 

@@ -5,6 +5,7 @@ import { errorText, formatDateTime, formatVnd, getLang, t } from '../i18n.js';
 import { downloadBlob, partnerQrImage, referralLink, referralQrDataUrl, ruleDiscount, ruleTerms, sharePartnerQr } from '../voucher-ui.js';
 import { icon } from '../nav.js';
 import { messageSlot, showLink, showMessage } from './common.js';
+import { billPhotoList } from './voucher-card.js';
 
 /** @typedef {import('../main.js').App} App */
 /**
@@ -19,7 +20,8 @@ import { messageSlot, showLink, showMessage } from './common.js';
  *   accounts: { id: string, email: string, displayName: string, status: string, role: string }[],
  *   qr: null | { token: string, createdAt: string },
  *   brand?: import('../voucher-ui.js').Brand | null,
- *   stats?: { opens: number, activations: number, redemptions: number, commissionOpen?: string, commissionPaid?: string, lastPaidAt?: string | null },
+ *   stats?: { opens: number, activations: number, redemptions: number, commissionOpen?: string, commissionPaid?: string,
+ *     commissionPending?: string, pendingReviews?: number, lastPaidAt?: string | null },
  * }} Partner
  */
 
@@ -382,6 +384,7 @@ function partnerStatsLine(p, settle) {
   const stats = /** @type {NonNullable<Partner['stats']>} */ (p.stats);
   const counts = t('partnerCounts', { opens: stats.opens, activations: stats.activations, redemptions: stats.redemptions });
   const unpaid = stats.commissionOpen !== undefined && stats.commissionOpen !== '0.0000';
+  const pending = stats.pendingReviews ?? 0;
   return `
     <div class="small mb-1 partner-stats">
       <span class="text-muted">${esc(counts)}</span>
@@ -389,11 +392,81 @@ function partnerStatsLine(p, settle) {
         stats.commissionOpen !== undefined
           ? `<span class="d-block">${esc(t('commissionOwed'))}: <strong>${esc(formatVnd(stats.commissionOpen))}</strong>
              · ${esc(t('commissionPaid'))}: <strong>${esc(formatVnd(stats.commissionPaid ?? '0'))}</strong></span>
+             ${pending ? `<span class="d-block">${esc(t('commissionPendingLine', { amount: formatVnd(stats.commissionPending ?? '0'), count: pending }))}</span>` : ''}
              ${stats.lastPaidAt ? `<span class="d-block text-muted">${esc(t('lastPaid', { date: formatDateTime(stats.lastPaidAt) }))}</span>` : ''}
-             ${settle && unpaid ? `<button type="button" class="btn btn-sm btn-primary mt-2" data-action="pay" data-id="${esc(p.id)}">${esc(t('markPaid'))}</button>` : ''}`
+             ${settle && unpaid ? `<button type="button" class="btn btn-sm btn-primary mt-2" data-action="pay" data-id="${esc(p.id)}">${esc(t('markPaid'))}</button>` : ''}
+             ${settle && pending ? `<button type="button" class="btn btn-sm btn-outline-primary mt-2" data-action="review" data-id="${esc(p.id)}">${esc(t('reviewOpen'))}</button>` : ''}`
           : ''
       }
     </div>`;
+}
+
+/**
+ * Bills the guest could not confirm, with their photos; approve turns the commission into unpaid
+ * commission, reject drops it.
+ * @param {Partner} partner
+ * @param {() => Promise<void>} onChanged
+ */
+async function reviewDialog(partner, onChanged) {
+  const dialog = document.createElement('dialog');
+  dialog.className = 'vdialog';
+  const render = async () => {
+    const { reviews } = await api('GET', `/api/v1/commission-reviews?partnerId=${encodeURIComponent(partner.id)}`);
+    dialog.innerHTML = `
+      <div class="vdialog-inner">
+        <button type="button" class="btn-close vdialog-close" data-close aria-label="${esc(t('close'))}"></button>
+        <h2 class="card-title">${esc(t('reviewTitle', { name: partner.name }))}</h2>
+        <p class="small text-muted">${esc(t('reviewHint'))}</p>
+        ${messageSlot('review-message')}
+        ${
+          reviews.length
+            ? reviews
+                .map(
+                  (/** @type {any} */ r) => `
+          <article class="review-item">
+            <p class="small mb-1"><strong translate="no">${esc(r.voucher?.code ?? '')}</strong> · ${esc(formatDateTime(r.createdAt))}</p>
+            <p class="small mb-1">${esc(t('reviewBill', { bill: formatVnd(r.voucher?.redemption?.grossAmount ?? '0'), pays: formatVnd(r.voucher?.redemption?.payableAmount ?? '0') }))}</p>
+            <p class="small mb-1">${esc(t('reviewReason', { reason: t(`fallback_${r.reason}`) }))} · ${esc(t('reviewCommission', { amount: formatVnd(r.amount) }))}</p>
+            ${billPhotoList(r.voucher?.billPhotos ?? [])}
+            <div class="partner-actions mt-2">
+              <button type="button" class="btn btn-sm btn-primary" data-review="approve" data-id="${esc(r.id)}">${esc(t('reviewApprove'))}</button>
+              <button type="button" class="btn btn-sm btn-outline-danger" data-review="reject" data-id="${esc(r.id)}">${esc(t('reviewReject'))}</button>
+            </div>
+          </article>`,
+                )
+                .join('')
+            : `<p class="text-muted mb-0">${esc(t('reviewNone'))}</p>`
+        }
+      </div>`;
+  };
+  dialog.addEventListener('click', async (event) => {
+    const target = /** @type {HTMLElement} */ (event.target);
+    if (target === dialog || target.closest('[data-close]')) return dialog.close();
+    const button = /** @type {HTMLButtonElement | null} */ (target.closest('button[data-review]'));
+    if (!button) return;
+    const decision = button.dataset.review;
+    /** @type {{ note?: string }} */
+    const body = {};
+    if (decision === 'reject') {
+      const note = prompt(t('reviewRejectPrompt'))?.trim();
+      if (!note) return;
+      body.note = note;
+    }
+    button.disabled = true;
+    try {
+      await api('POST', `/api/v1/commission-reviews/${encodeURIComponent(button.dataset.id ?? '')}/${decision}`, body);
+      await onChanged();
+      await render();
+      showMessage(t(decision === 'approve' ? 'reviewApproved' : 'reviewRejected'), 'success', 'review-message');
+    } catch (error) {
+      button.disabled = false;
+      showMessage(errorText(error), 'error', 'review-message');
+    }
+  });
+  dialog.addEventListener('close', () => dialog.remove());
+  await render();
+  document.body.append(dialog);
+  dialog.showModal();
 }
 
 /**
@@ -546,6 +619,11 @@ export function mountPartners(app) {
     if (!partner) return;
     const path = `/api/v1/partners/${encodeURIComponent(partner.id)}`;
     const action = button.getAttribute('data-action');
+
+    if (action === 'review') {
+      reviewDialog(partner, load).catch((error) => showMessage(errorText(error), 'error', 'partner-message'));
+      return;
+    }
 
     if (action === 'qr') {
       qrDialog(partner, {
