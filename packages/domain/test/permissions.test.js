@@ -31,6 +31,7 @@ const EXPECTED = {
     'commission.list',
     'commission.settle',
     'commission.review',
+    'commission.report',
   ],
   MANAGER: [
     'surface.console',
@@ -75,6 +76,8 @@ describe('@permission matrix', () => {
   it('Staff and Manager never see commission (DEC-088)', () => {
     assert.equal(can(ROLES.STAFF, 'commission.list'), false);
     assert.equal(can(ROLES.MANAGER, 'commission.list'), false);
+    assert.equal(can(ROLES.STAFF, 'commission.report'), false);
+    assert.equal(can(ROLES.MANAGER, 'commission.report'), false);
   });
 
   it('Staff cannot open the console (E2E-S1-01)', () => {

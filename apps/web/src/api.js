@@ -39,17 +39,40 @@ export async function api(method, path, body) {
     throw new ApiError(0, 'NETWORK', 'Network error');
   }
   const data = await res.json().catch(() => null);
-  if (!res.ok) {
-    if (data?.error?.code === 'UNAUTHENTICATED') window.dispatchEvent(new Event(SESSION_ENDED));
-    throw new ApiError(
-      res.status,
-      data?.error?.code ?? 'UNKNOWN',
-      data?.error?.message ?? res.statusText,
-      data?.error?.details,
-      Number(res.headers.get('Retry-After')) || 0,
-    );
-  }
+  if (!res.ok) throw failure(res, data);
   return data;
+}
+
+/**
+ * @param {Response} res
+ * @param {any} data parsed JSON error body
+ */
+function failure(res, data) {
+  if (data?.error?.code === 'UNAUTHENTICATED') window.dispatchEvent(new Event(SESSION_ENDED));
+  return new ApiError(
+    res.status,
+    data?.error?.code ?? 'UNKNOWN',
+    data?.error?.message ?? res.statusText,
+    data?.error?.details,
+    Number(res.headers.get('Retry-After')) || 0,
+  );
+}
+
+/**
+ * A file from the API (e.g. a CSV) with the name the server gives it; errors as for `api`.
+ * @param {string} path
+ * @returns {Promise<{ blob: Blob, fileName: string }>}
+ */
+export async function apiFile(path) {
+  let res;
+  try {
+    res = await fetch(path, { credentials: 'same-origin' });
+  } catch {
+    throw new ApiError(0, 'NETWORK', 'Network error');
+  }
+  if (!res.ok) throw failure(res, await res.json().catch(() => null));
+  const fileName = /filename="([^"]+)"/.exec(res.headers.get('Content-Disposition') ?? '')?.[1] ?? 'download';
+  return { blob: await res.blob(), fileName };
 }
 
 /**
