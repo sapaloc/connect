@@ -85,3 +85,55 @@ jobs:
       # Uses .env.test: throwaway local MongoDB, fake secrets.
       - name: Tests (@money, @permission, unit + integration)
         run: pnpm test
+
+  e2e:
+    name: e2e
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      # Service containers cannot pass --replSet, and transactions need a replica set.
+      - name: Start MongoDB replica set
+        run: |
+          docker run -d --name connect-mongo -p 27017:27017 mongo:7 --replSet rs0
+          for i in $(seq 1 30); do
+            if docker exec connect-mongo mongosh --quiet --eval 'try { rs.status().ok } catch (e) { rs.initiate().ok }'; then
+              break
+            fi
+            sleep 2
+          done
+          for i in $(seq 1 30); do
+            state=$(docker exec connect-mongo mongosh --quiet --eval 'rs.status().myState' || true)
+            [ "$state" = "1" ] && exit 0
+            sleep 1
+          done
+          echo "::error::MongoDB replica set did not become primary"
+          exit 1
+
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      # Uses .env.test: throwaway local MongoDB, fake secrets.
+      - name: End-to-end tests (Playwright, Chromium)
+        run: pnpm test:e2e
+
+      - name: Upload report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
