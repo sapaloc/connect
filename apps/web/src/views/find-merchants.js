@@ -133,14 +133,8 @@ export function mountFindMerchants(app) {
     if (target.closest('[data-open-my]')) {
       try {
         const profile = await fetchProfile();
-        if (profile?.roles.length === 1) {
-          const next = await api('POST', '/api/v1/auth/select-role', { roleAssignmentId: profile.roles[0].roleAssignmentId });
-          app.setProfile(next);
-          app.navigate(/** @type {string} */ (next.landing), { replace: true });
-        } else {
-          app.setProfile(profile);
-          app.navigate('/select-role', { replace: true });
-        }
+        app.setProfile(profile);
+        app.navigate(profile?.activeRole ? /** @type {string} */ (profile.landing) : '/select-role', { replace: true });
       } catch (error) {
         showMessage(errorText(error), 'error', 'fm-message');
       }

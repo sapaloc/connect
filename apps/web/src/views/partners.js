@@ -799,7 +799,10 @@ export function mountPartners(app) {
               : {}),
           });
           const created = t('partnerCreated', { name: result.partner.name });
-          if (result.invitation) showInvitation(created, result.invitation, values.accountName, 'partner-link', 'partner-message');
+          if (result.invitation?.status === 'ACTIVE') {
+            $('#partner-link').hidden = true;
+            showMessage(`${created} ${t('partnerAccountLinked', { email: values.accountEmail.trim().toLowerCase() })}`, 'success', 'partner-message');
+          } else if (result.invitation) showInvitation(created, result.invitation, values.accountName, 'partner-link', 'partner-message');
           else showMessage(created, 'success', 'partner-message');
           resetCreateForm();
           setCreateOpen(false);

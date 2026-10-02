@@ -463,7 +463,7 @@ export function selectRoleView(app) {
   const merchants = switchLabel(profile) === 'switchMerchant';
   app.root.innerHTML = authLayout({
     title: t(merchants ? 'chooseMerchantTitle' : 'chooseRoleTitle'),
-    subtitle: t(merchants ? 'chooseMerchantSubtitle' : 'chooseRoleSubtitle'),
+    subtitle: t(merchants ? (profile.roles.length > 1 ? 'chooseMerchantSubtitle' : 'chooseMerchantSubtitleOne') : 'chooseRoleSubtitle'),
     body: `
       <div class="d-grid gap-2">
         ${profile.roles

@@ -55,14 +55,19 @@ async function expectNoHorizontalScroll(page) {
   expect(overflow, 'no horizontal scroll').toBeLessThanOrEqual(0);
 }
 
-/** Merchant admin of Number160 turns "Accept new partners" on (Console → Brand). */
-async function acceptNewPartners(browser) {
-  const { context, page } = await openAs(browser, 'admin', '/console/brand');
+/**
+ * The merchant admin turns "Accept new partners" on (Console → Brand).
+ * @param {import('@playwright/test').Browser} browser
+ * @param {'admin' | 'restaurantAdmin'} [account]
+ */
+async function acceptNewPartners(browser, account = 'admin') {
+  const merchant = account === 'admin' ? 'Number160' : 'Nhà hàng Demo';
+  const { context, page } = await openAs(browser, account, '/console/brand');
   const toggle = page.getByRole('switch', { name: 'Accept new partners' });
   await expect(toggle).toBeEnabled();
   if (!(await toggle.isChecked())) {
     await toggle.click();
-    await expect(page.locator('#accept-message')).toHaveText('On: partners can find Number160 and send requests.');
+    await expect(page.locator('#accept-message')).toHaveText(`On: partners can find ${merchant} and send requests.`);
   }
   await expect(toggle).toBeChecked();
   await expectNoHorizontalScroll(page);
@@ -125,7 +130,16 @@ test('merchant accepts new partners; a partner finds it and asks; the admin appr
   await page.getByPlaceholder('Search by name').fill('number160');
   await expect(card.getByText('Already a partner')).toBeVisible();
   await expect(page.locator('#fm-joined')).toContainText('You are now a partner of Number160.');
-  await page.getByRole('button', { name: 'Open MyConnect' }).click();
+
+  // Reloading picks up the only role: no "Choose a merchant" screen, no new sign-in.
+  await page.reload();
+  await expect(page).toHaveURL(/\/my\/merchants$/);
+  await expect(page.getByRole('heading', { name: 'Choose a merchant' })).toHaveCount(0);
+  const merchantCard = page.locator('.fm-merchant', { hasText: 'Number160' });
+  await expect(merchantCard.getByText('Already a partner')).toBeVisible();
+  await expect(page.locator('#fm-joined')).toBeHidden();
+  const nav = test.info().project.name === 'phone' ? page.locator('.bn') : page.locator('#sidebar');
+  await nav.getByRole('link', { name: 'Partner', exact: true }).click();
   await expect(page).toHaveURL(/\/my$/);
   await expect(page.locator('.my-page .eyebrow').first()).toHaveText('Number160');
   await expect(page.locator('.my-page h2').first()).toHaveText(partner.name);
@@ -166,14 +180,35 @@ test('a partner with merchants finds more from MyConnect; the Manager sees reque
   await expect(page.locator('#fm-message')).toHaveText('Request to Number160 cancelled.');
   await expect(page.locator('.fm-merchant', { hasText: 'Number160' }).getByRole('button', { name: 'Ask to join' })).toBeVisible();
   await partnerContext.close();
+});
 
-  const { context: referrerContext, page: referrer } = await openAs(browser, 'referrer', '/my');
+test('a partner added by a merchant finds another merchant from MyConnect and asks to join', async ({ browser }) => {
+  await acceptNewPartners(browser, 'restaurantAdmin');
   const isPhone = test.info().project.name === 'phone';
-  const nav = isPhone ? referrer.locator('.bn') : referrer.locator('#sidebar');
+  // Merchant-created seed partners of Number160 only; one per project so both can run at once.
+  const account = isPhone ? 'referrer' : 'driver';
+  const profileName = isPhone ? 'Hướng dẫn viên Demo' : 'Tài xế Demo';
+  const { context, page } = await openAs(browser, account, '/my');
+  const nav = isPhone ? page.locator('.bn') : page.locator('#sidebar');
   await nav.getByRole('link', { name: 'Find merchants' }).click();
-  await expect(referrer).toHaveURL(/\/my\/merchants$/);
-  await expect(referrer.locator('.tb-title')).toHaveText('Find merchants');
-  await expect(referrer.locator('.fm-merchant', { hasText: 'Number160' })).toContainText('Already a partner');
-  await expectNoHorizontalScroll(referrer);
-  await referrerContext.close();
+  await expect(page).toHaveURL(/\/my\/merchants$/);
+  await expect(page.locator('.tb-title')).toHaveText('Find merchants');
+  await expect(page.locator('.fm-merchant', { hasText: 'Number160' })).toContainText('Already a partner');
+  const restaurant = page.locator('.fm-merchant', { hasText: 'Nhà hàng Demo' });
+  await restaurant.getByRole('button', { name: 'Ask to join' }).click();
+  await page.locator('dialog[open]').getByRole('button', { name: 'Send request' }).click();
+  await expect(page.locator('#fm-message')).toContainText('Request sent to Nhà hàng Demo.');
+  await expect(restaurant.getByText('Requested', { exact: true })).toBeVisible();
+  await expectNoHorizontalScroll(page);
+
+  const admin = await openAs(browser, 'restaurantAdmin', '/console/partners');
+  const request = admin.page.locator('#join-card .join-card', { hasText: profileName });
+  await expect(request).toBeVisible();
+  await expect(request.getByRole('button', { name: 'Approve' })).toBeVisible();
+  await admin.context.close();
+
+  page.once('dialog', (confirm) => confirm.accept());
+  await restaurant.getByRole('button', { name: 'Cancel request' }).click();
+  await expect(page.locator('#fm-message')).toHaveText('Request to Nhà hàng Demo cancelled.');
+  await context.close();
 });

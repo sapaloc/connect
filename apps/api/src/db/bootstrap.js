@@ -41,6 +41,32 @@ export function newRoleAssignment({ role, tenantId, partnerRelationshipId = null
 }
 
 /**
+ * The partner's own profile (one per account, across merchants), filled from one of its merchant partner
+ * records. Merchants keep their own name and contact on `partners`; the partner edits the profile.
+ * @param {{ userId: string, email: string, preferredLanguage?: string | null, partner: any, createdBy?: string | null }} input
+ */
+export function newPartnerProfile({ userId, email, preferredLanguage, partner, createdBy = null }) {
+  const now = new Date();
+  return {
+    _id: randomUUID(),
+    userId,
+    relationshipKind: partner.relationshipKind,
+    partnerType: partner.partnerType,
+    name: partner.name,
+    contactName: partner.contactName ?? null,
+    phone: partner.contactPhone ?? null,
+    email,
+    preferredLanguage: preferredLanguage === 'vi' ? 'vi' : 'en',
+    note: null,
+    status: 'ACTIVE',
+    applicationId: null,
+    approvedBy: createdBy,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+/**
  * Adds the role unless the user already holds it, active, in the same tenant (and partner).
  * @param {string} userId
  * @param {RoleInput} input

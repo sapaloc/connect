@@ -189,6 +189,26 @@ const TEMPLATES = {
       link: { label: 'Mở MyConnect', url: `${d.origin}/login` },
     }),
   },
+  PARTNER_ADDED_BY_MERCHANT: {
+    en: (d) => ({
+      subject: `${d.merchantName} added you as a partner`,
+      greeting: `Hello ${d.displayName},`,
+      paragraphs: [
+        `${d.merchantName} added ${d.name} as a partner. Your QR code and terms for ${d.merchantName} are now in MyConnect.`,
+        'Sign in with your usual email and password.',
+      ],
+      link: { label: 'Open MyConnect', url: `${d.origin}/login` },
+    }),
+    vi: (d) => ({
+      subject: `${d.merchantName} đã thêm bạn làm partner`,
+      greeting: `Xin chào ${d.displayName},`,
+      paragraphs: [
+        `${d.merchantName} đã thêm ${d.name} làm partner. Mã QR và điều khoản của bạn tại ${d.merchantName} đã có trong MyConnect.`,
+        'Đăng nhập bằng email và mật khẩu bạn vẫn dùng.',
+      ],
+      link: { label: 'Mở MyConnect', url: `${d.origin}/login` },
+    }),
+  },
   JOIN_REQUEST_REJECTED: {
     en: (d) => ({
       subject: `${d.merchantName} did not accept your partner request`,

@@ -14,14 +14,15 @@ import { randomUUID } from 'node:crypto';
 import { actorOf, recordAudit } from '../audit/audit.js';
 import { authed } from '../auth/guard.js';
 import { fromDecimal128, toDecimal128 } from '../db/decimal.js';
-import { newCommercialRule, newReferralMedium, partnerNameKey, RATE_FIELDS } from '../db/bootstrap.js';
+import { newCommercialRule, newPartnerProfile, newReferralMedium, partnerNameKey, RATE_FIELDS } from '../db/bootstrap.js';
 import { collection } from '../db/mongo.js';
 import { withTransaction } from '../db/tx.js';
 import { inviteMember, parsePerson } from '../foundation/user-routes.js';
 import { HttpError } from '../http/errors.js';
-import { readJson, stringField } from '../http/request.js';
+import { publicOrigin, readJson, stringField } from '../http/request.js';
 import { sendJson } from '../http/respond.js';
 import { merchantBrands, merchantNames, scopeFilter, UUID_PATTERN } from '../merchants/scope.js';
+import { notify } from '../notify/notify.js';
 import { MERCHANT_PAYS, partnerStats, payoutView } from './stats.js';
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -311,12 +312,56 @@ export async function insertPartner(req, ctx, { rule, ...fields }, account, tx) 
   const invitation = account
     ? await inviteMember(req, ctx, { ...account, role: partnerAccountRole(partner.relationshipKind), tenantId, partnerRelationshipId: partner._id }, tx)
     : null;
+  if (invitation) await ensurePartnerProfile(invitation.userId, partner, session.userId, tx);
   return { partner, invitation };
+}
+
+/**
+ * Gives the account its partner profile, from this partner record, when it has none yet. An existing
+ * profile is the partner's own and is never overwritten.
+ * @param {string} userId
+ * @param {any} partner
+ * @param {string} createdBy
+ * @param {import('mongodb').ClientSession} tx
+ */
+async function ensurePartnerProfile(userId, partner, createdBy, tx) {
+  const profiles = await collection('partnerProfiles');
+  if (await profiles.countDocuments({ userId }, { session: tx, limit: 1 })) return;
+  const users = await collection('users');
+  const user = await users.findOne({ _id: userId }, { session: tx, projection: { email: 1, preferredLanguage: 1 } });
+  if (!user) return;
+  await profiles.insertOne(newPartnerProfile({ userId, email: user.email, preferredLanguage: user.preferredLanguage, partner, createdBy }), { session: tx });
 }
 
 /** @param {any} partner */
 export async function partnerWithRelated(partner) {
   return partnerView(partner, await related([partner]));
+}
+
+/**
+ * Tells an account that already signs in (a partner of other merchants, or a free partner) that this
+ * merchant added it; it keeps its password.
+ * @param {import('node:http').IncomingMessage} req
+ * @param {import('../http/router.js').Context} ctx
+ * @param {any} partner
+ * @param {string} userId
+ */
+async function notifyAddedPartner(req, ctx, partner, userId) {
+  const users = await collection('users');
+  const user = await users.findOne({ _id: userId }, { projection: { email: 1, displayName: 1, preferredLanguage: 1 } });
+  if (!user) return false;
+  const names = await merchantNames([partner.tenantId]);
+  return notify(
+    'PARTNER_ADDED_BY_MERCHANT',
+    {
+      to: [{ email: user.email, language: user.preferredLanguage === 'vi' ? 'vi' : 'en' }],
+      name: partner.name,
+      displayName: user.displayName,
+      merchantName: names.get(partner.tenantId) ?? '',
+      origin: publicOrigin(req),
+    },
+    { ...actorOf(ctx), entityType: 'partner_relationship', entityId: partner._id },
+  );
 }
 
 /**
@@ -331,7 +376,8 @@ async function createPartner(req, res, ctx) {
   const account = accountBody ? parsePerson(accountBody) : null;
   try {
     const { partner, invitation } = await withTransaction((tx) => insertPartner(req, ctx, fields, account, tx));
-    sendJson(res, 201, { partner: await partnerWithRelated(partner), invitation });
+    const emailSent = invitation?.status === 'ACTIVE' ? await notifyAddedPartner(req, ctx, partner, invitation.userId) : false;
+    sendJson(res, 201, { partner: await partnerWithRelated(partner), invitation, emailSent });
   } catch (error) {
     if (/** @type {any} */ (error)?.code === 11000) throw partnerExists();
     throw error;

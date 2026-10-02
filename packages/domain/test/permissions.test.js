@@ -113,6 +113,13 @@ describe('roleConflict: one side per person', () => {
     assert.equal(roleConflict([{ role: ROLES.REFERRER, tenantId: A }], { role: ROLES.PARTNER_ADMIN, tenantId: B }), null);
   });
 
+  it('a partner works with each merchant through one partner record', () => {
+    const held = [{ role: ROLES.REFERRER, tenantId: A, partnerRelationshipId: 'p1' }];
+    assert.equal(roleConflict(held, { role: ROLES.REFERRER, tenantId: A, partnerRelationshipId: 'p2' }), 'PARTNER_ALREADY_IN_MERCHANT');
+    assert.equal(roleConflict(held, { role: ROLES.PARTNER_ADMIN, tenantId: A, partnerRelationshipId: 'p2' }), 'PARTNER_ALREADY_IN_MERCHANT');
+    assert.equal(roleConflict(held, { role: ROLES.REFERRER, tenantId: A, partnerRelationshipId: 'p1' }), null);
+  });
+
   it('never mixes merchant team, partner and platform roles', () => {
     assert.equal(roleConflict([{ role: ROLES.PARTNER_ADMIN, tenantId: A }], { role: ROLES.STAFF, tenantId: B }), 'ROLE_SIDE_CONFLICT');
     assert.equal(roleConflict([{ role: ROLES.MANAGER, tenantId: A }], { role: ROLES.REFERRER, tenantId: A }), 'ROLE_SIDE_CONFLICT');
