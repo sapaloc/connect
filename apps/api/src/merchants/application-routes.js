@@ -12,7 +12,7 @@ import { collection } from '../db/mongo.js';
 import { withTransaction } from '../db/tx.js';
 import { parsePerson } from '../foundation/user-routes.js';
 import { HttpError } from '../http/errors.js';
-import { clientIp, readJson, stringField } from '../http/request.js';
+import { clientIp, publicOrigin, readJson, stringField } from '../http/request.js';
 import { sendJson } from '../http/respond.js';
 import { notify } from '../notify/notify.js';
 import { insertMerchant, merchantView, parseMerchantFields } from './merchant-routes.js';
@@ -70,13 +70,19 @@ function parseApplicant(value) {
   }
 }
 
-/** Emails of the active Platform admins, for the "new application" notice. */
-async function platformAdminEmails() {
+/**
+ * Active Platform admins, for the "new application" notice, each in their own language.
+ * @returns {Promise<import('../notify/notify.js').Recipient[]>}
+ */
+async function platformAdminRecipients() {
   const users = await collection('users');
   const rows = await users
-    .find({ status: 'ACTIVE', roles: { $elemMatch: { role: ROLES.PLATFORM_ADMIN, status: 'ACTIVE' } } }, { projection: { email: 1 } })
+    .find(
+      { status: 'ACTIVE', roles: { $elemMatch: { role: ROLES.PLATFORM_ADMIN, status: 'ACTIVE' } } },
+      { projection: { email: 1, preferredLanguage: 1 } },
+    )
     .toArray();
-  return rows.map((user) => user.email);
+  return rows.map((user) => ({ email: user.email, language: user.preferredLanguage === 'vi' ? 'vi' : 'en' }));
 }
 
 /**
@@ -151,8 +157,20 @@ async function submitApplication(req, res, ctx) {
     throw error;
   }
 
-  await notify('APPLICATION_RECEIVED', { to: [admin.email], language: admin.preferredLanguage, name: fields.name, displayName: admin.displayName });
-  await notify('APPLICATION_NEW_FOR_ADMINS', { to: await platformAdminEmails(), name: fields.name, applicationId: application._id });
+  const context = { correlationId: ctx.requestId, entityType: 'merchant_application', entityId: application._id };
+  const origin = publicOrigin(req);
+  await Promise.all([
+    notify(
+      'APPLICATION_RECEIVED',
+      { to: [{ email: admin.email, language: admin.preferredLanguage }], name: fields.name, displayName: admin.displayName, origin },
+      context,
+    ),
+    notify(
+      'APPLICATION_NEW_FOR_ADMINS',
+      { to: await platformAdminRecipients(), name: fields.name, displayName: admin.displayName, applicantEmail: admin.email, origin },
+      context,
+    ),
+  ]);
   sendJson(res, 202, RECEIVED);
 }
 
@@ -273,22 +291,28 @@ async function approveApplication(req, res, ctx) {
       { ...actor, eventType: 'TEMPORARY_PASSWORD_ISSUED', entityType: 'user_account', entityId: userId, after: { role: ROLES.TENANT_ADMIN, expiresAt } },
       { session: tx },
     );
-    return { tenant, email, displayName, preferredLanguage, expiresAt };
+    return { tenant, email, displayName, preferredLanguage, expiresAt, userId };
   });
 
-  await notify('APPLICATION_APPROVED', {
-    to: [result.email],
-    language: result.preferredLanguage,
-    name: result.tenant.name,
-    displayName: result.displayName,
-    temporaryPassword,
-    expiresAt: result.expiresAt.toISOString(),
-  });
+  const emailSent = await notify(
+    'APPLICATION_APPROVED',
+    {
+      to: [{ email: result.email, language: result.preferredLanguage }],
+      name: result.tenant.name,
+      displayName: result.displayName,
+      email: result.email,
+      temporaryPassword,
+      expiresAt: result.expiresAt.toISOString(),
+      origin: publicOrigin(req),
+    },
+    { ...actorOf(ctx), tenantId: result.tenant._id, entityType: 'user_account', entityId: result.userId },
+  );
   sendJson(res, 201, {
     merchant: merchantView(result.tenant, new Map()),
     admin: { email: result.email },
     temporaryPassword,
     expiresAt: result.expiresAt.toISOString(),
+    emailSent,
   });
 }
 
@@ -309,15 +333,25 @@ async function rejectApplication(req, res, ctx) {
     return { ...found, status: 'REJECTED', reviewedBy: session.userId, reviewedAt: now, rejectReason: reason };
   });
 
-  await notify('APPLICATION_REJECTED', { to: [application.admin.email], language: application.admin.preferredLanguage, name: application.name, reason });
-  sendJson(res, 200, { application: applicationView(application) });
+  const emailSent = await notify(
+    'APPLICATION_REJECTED',
+    {
+      to: [{ email: application.admin.email, language: application.admin.preferredLanguage }],
+      name: application.name,
+      displayName: application.admin.displayName,
+      reason,
+      origin: publicOrigin(req),
+    },
+    { ...actorOf(ctx), entityType: 'merchant_application', entityId: application._id },
+  );
+  sendJson(res, 200, { application: applicationView(application), emailSent });
 }
 
 /**
  * New temporary password for an account that has not replaced its temporary one yet; old sessions end.
  * @type {import('../http/router.js').Handler}
  */
-async function reissueTemporaryPassword(_req, res, ctx) {
+async function reissueTemporaryPassword(req, res, ctx) {
   const userId = ctx.params.userId.toLowerCase();
   if (!UUID_PATTERN.test(userId)) throw new HttpError(404, 'USER_NOT_FOUND', 'User not found');
   const temporaryPassword = newTemporaryPassword();
@@ -346,17 +380,22 @@ async function reissueTemporaryPassword(_req, res, ctx) {
       { ...actorOf(ctx), tenantId, eventType: 'TEMPORARY_PASSWORD_ISSUED', entityType: 'user_account', entityId: userId, after: { expiresAt } },
       { session: tx },
     );
-    return { user, expiresAt };
+    return { user, expiresAt, tenantId };
   });
 
-  await notify('TEMPORARY_PASSWORD_REISSUED', {
-    to: [result.user.email],
-    language: result.user.preferredLanguage,
-    displayName: result.user.displayName,
-    temporaryPassword,
-    expiresAt: result.expiresAt.toISOString(),
-  });
-  sendJson(res, 201, { admin: { email: result.user.email }, temporaryPassword, expiresAt: result.expiresAt.toISOString() });
+  const emailSent = await notify(
+    'TEMPORARY_PASSWORD_REISSUED',
+    {
+      to: [{ email: result.user.email, language: result.user.preferredLanguage }],
+      displayName: result.user.displayName,
+      email: result.user.email,
+      temporaryPassword,
+      expiresAt: result.expiresAt.toISOString(),
+      origin: publicOrigin(req),
+    },
+    { ...actorOf(ctx), tenantId: result.tenantId, entityType: 'user_account', entityId: userId },
+  );
+  sendJson(res, 201, { admin: { email: result.user.email }, temporaryPassword, expiresAt: result.expiresAt.toISOString(), emailSent });
 }
 
 /** @type {import('../http/router.js').RouteDef[]} */

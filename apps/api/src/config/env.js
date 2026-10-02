@@ -22,6 +22,12 @@ export const env = Object.freeze({
   logLevel: source.LOG_LEVEL || 'info',
   commitSha: source.VERCEL_GIT_COMMIT_SHA || source.GITHUB_SHA || '',
   seedPassword: source.SEED_PASSWORD || '',
+  mailService: source.MAIL_SERVICE || '',
+  smtpHost: source.SMTP_HOST || '',
+  smtpPort: Number(source.SMTP_PORT || 587),
+  mailUser: source.MAIL_USER || '',
+  mailPass: source.MAIL_PASS || '',
+  mailFrom: source.MAIL_FROM || source.MAIL_USER || '',
 });
 
 /** Test resets and fake data are only allowed here (plan §5.1). */

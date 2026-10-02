@@ -150,9 +150,9 @@ function showInvitation(message, invitation, name, boxId, slotId) {
 /**
  * Sign-in email, temporary password (shown once, with a copy button) and its expiry.
  * @param {HTMLDialogElement} dialog
- * @param {{ title: string, intro: string, email: string, temporaryPassword: string, expiresAt: string }} content
+ * @param {{ title: string, intro: string, email: string, temporaryPassword: string, expiresAt: string, emailSent: boolean }} content
  */
-function showCredentials(dialog, { title, intro, email, temporaryPassword, expiresAt }) {
+function showCredentials(dialog, { title, intro, email, temporaryPassword, expiresAt, emailSent }) {
   const inner = /** @type {HTMLElement} */ (dialog.querySelector('.vdialog-inner'));
   inner.innerHTML = `
     <button type="button" class="btn-close vdialog-close" data-close aria-label="${esc(t('close'))}"></button>
@@ -171,6 +171,7 @@ function showCredentials(dialog, { title, intro, email, temporaryPassword, expir
       <dt>${esc(t('expires'))}</dt>
       <dd>${esc(formatDateTime(expiresAt))}</dd>
     </dl>
+    <p class="small mb-1" data-email-status>${esc(emailSent ? t('emailSentTo', { email }) : t('emailNotSentCopy'))}</p>
     <p class="small text-muted mb-3">${esc(t('temporaryPasswordOnce'))}</p>
     <button type="button" class="btn btn-primary w-100" data-close>${esc(t('done'))}</button>`;
   const copy = /** @type {HTMLButtonElement} */ (inner.querySelector('[data-copy-password]'));
@@ -258,6 +259,7 @@ export function mountMerchants(_app) {
             email: result.admin.email,
             temporaryPassword: result.temporaryPassword,
             expiresAt: result.expiresAt,
+            emailSent: result.emailSent === true,
           });
           showMessage(t('merchantCreated', { name: result.merchant.name }), 'success', 'application-message');
           await Promise.all([loadApplications(), load()]);
@@ -295,7 +297,8 @@ export function mountMerchants(_app) {
         try {
           const result = await api('POST', `/api/v1/merchant-applications/${encodeURIComponent(a.id)}/reject`, { reason });
           dialog.close();
-          showMessage(t('applicationRejected', { name: a.name, reason: result.application.rejectReason }), 'success', 'application-message');
+          const emailNote = result.emailSent === true ? t('emailSentTo', { email: a.admin.email }) : t('emailNotSentTell');
+          showMessage(`${t('applicationRejected', { name: a.name, reason: result.application.rejectReason })} ${emailNote}`, 'success', 'application-message');
           await loadApplications();
         } catch (error) {
           showMessage(errorText(error), 'error', 'reject-message');
@@ -325,6 +328,7 @@ export function mountMerchants(_app) {
         email: result.admin.email,
         temporaryPassword: result.temporaryPassword,
         expiresAt: result.expiresAt,
+        emailSent: result.emailSent === true,
       });
       await load();
     } catch (error) {

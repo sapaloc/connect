@@ -20,6 +20,9 @@ importers:
       mongodb:
         specifier: ^7.6.0
         version: 7.6.0
+      nodemailer:
+        specifier: ^10.0.13
+        version: 10.0.13
       qrcode:
         specifier: ^1.5.4
         version: 1.5.4
@@ -647,6 +650,10 @@ packages:
     engines: {node: ^10 || ^12 || ^13.7 || ^14 || >=15.0.1}
     hasBin: true
 
+  nodemailer@10.0.13:
+    resolution: {integrity: sha512-SzG86OlvcW/NNhUFC6uROMwRTL4n7MswfQqC/T8mhkmnY1YVa23zUEMYi4ijSeXSl9GLz9ZeTJDUatEDuY5FeQ==}
+    engines: {node: '>=20.0.0'}
+
   p-limit@2.3.0:
     resolution: {integrity: sha512-//88mFWSJx8lxCzwdAABTJL2MyWB12+eIY7MDL2SqLmAkeKU9qxRvWuSyTjm3FUmpBEMuFfckAIqEaVGUDxb6w==}
     engines: {node: '>=6'}
@@ -1206,6 +1213,8 @@ snapshots:
       mongodb-connection-string-url: 7.0.2
 
   nanoid@3.3.19: {}
+
+  nodemailer@10.0.13: {}
 
   p-limit@2.3.0:
     dependencies:

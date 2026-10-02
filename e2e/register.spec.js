@@ -118,6 +118,9 @@ test.describe('register on a phone', () => {
     await dialog.getByRole('button', { name: 'Approve' }).click();
     await expect(dialog.getByRole('heading', { name: `${applicant.name} created` })).toBeVisible();
     await expect(dialog).toContainText(applicant.email);
+    await expect(dialog.locator('[data-email-status]')).toHaveText(
+      'Email not sent — copy the password and give it to the admin yourself (phone or in person).',
+    );
     const temporaryPassword = await dialog.locator('.temp-password').inputValue();
     expect(temporaryPassword).toMatch(/^(?=.*[A-Z])(?=.*[a-z])(?=.*\d)(?=.*[^A-Za-z0-9]).{16}$/);
     await dialog.getByRole('button', { name: 'Done' }).click();
@@ -161,7 +164,7 @@ test.describe('register on a phone', () => {
     await dialog.getByRole('button', { name: 'Reject' }).click();
     await expect(dialog).toBeHidden();
     await expect(page.locator('#application-message')).toHaveText(
-      `Application from ${applicant.name} rejected. Reason saved: “Not a spa business”.`,
+      `Application from ${applicant.name} rejected. Reason saved: “Not a spa business”. Email not sent — tell the applicant yourself.`,
     );
     await expect(page.locator('.application', { hasText: applicant.name })).toHaveCount(0);
     await context.close();
