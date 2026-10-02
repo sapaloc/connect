@@ -91,6 +91,23 @@ On UAT use GitHub Actions → **Reset UAT database** → Run workflow on `uat`, 
 invited from Console → Team; the invitation (72h) and reset (1h) links are shown once to the admin, who sends
 them by Zalo or email.
 
+## Email
+
+Merchant registration emails (application received, new application for Platform admins, approval with the
+temporary password, rejection, new temporary password) are sent with nodemailer, in the recipient's language.
+Settings live only in env (`.env` locally, Vercel env on UAT/production):
+
+- Gmail: `MAIL_SERVICE=gmail`, `MAIL_USER` (the Gmail address), `MAIL_PASS` (a 16-character
+  [App Password](https://myaccount.google.com/apppasswords), needs 2-step verification; not the account password),
+  `MAIL_FROM` (e.g. `"Connect <connect.mail@gmail.com>"`, defaults to `MAIL_USER`).
+- Other SMTP (e.g. Google Workspace later): leave `MAIL_SERVICE` empty, set `SMTP_HOST` and `SMTP_PORT`
+  (465 = TLS, otherwise STARTTLS), plus `MAIL_USER` / `MAIL_PASS` / `MAIL_FROM`.
+
+With no settings nothing is sent: `APP_ENV=local` prints the whole email in the API terminal, UAT/production log only
+the type and recipient. A failed or slow send (8 s limit) never blocks the action: it is logged and recorded as an
+`EMAIL_FAILED` audit event, and Console shows "Email not sent" so the Platform admin can copy the temporary password.
+Tests use an in-memory transport and never connect to a mail server.
+
 ## Tests
 
 Integration tests use `.env.test` and drop the `connect_test` database, so run them against the local
