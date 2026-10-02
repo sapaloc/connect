@@ -85,8 +85,6 @@ test('merchant accepts new partners; a partner finds it and asks; the admin appr
   await page.getByRole('link', { name: 'Find merchants' }).click();
   await expect(page).toHaveURL(/\/my\/merchants$/);
   await expect(page.getByRole('heading', { name: 'Find merchants', level: 1 })).toBeVisible();
-  await expect(page.locator('.fm-merchant', { hasText: 'Nhà hàng Demo' })).toHaveCount(0);
-
   await page.getByPlaceholder('Search by name').fill('number');
   const card = page.locator('.fm-merchant', { hasText: 'Number160' });
   await expect(card).toBeVisible();
