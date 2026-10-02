@@ -1,4 +1,4 @@
-import { fixedRuleFromAmounts, isFixedRule, PARTNER_TYPES, percentRuleFromPercents, PRICING_MODELS, ratePercent, toVnd } from '#domain';
+import { fixedRuleFromAmounts, formatVoucherCode, isFixedRule, PARTNER_TYPES, percentRuleFromPercents, PRICING_MODELS, ratePercent, toVnd } from '#domain';
 import { api } from '../api.js';
 import { $, busy, esc, formValues } from '../dom.js';
 import { errorText, formatDateTime, formatVnd, getLang, groupDigits, t } from '../i18n.js';
@@ -436,7 +436,7 @@ async function reviewDialog(partner, onChanged) {
                 .map(
                   (/** @type {any} */ r) => `
           <article class="review-item">
-            <p class="small mb-1"><strong translate="no">${esc(r.voucher?.code ?? '')}</strong> · ${esc(formatDateTime(r.createdAt))}</p>
+            <p class="small mb-1"><strong class="font-monospace" translate="no">${esc(r.voucher?.code ? formatVoucherCode(r.voucher.code) : '')}</strong> · ${esc(formatDateTime(r.createdAt))}</p>
             <p class="small mb-1">${esc(t('reviewBill', { bill: formatVnd(r.voucher?.redemption?.grossAmount ?? '0'), pays: formatVnd(r.voucher?.redemption?.payableAmount ?? '0') }))}</p>
             <p class="small mb-1">${esc(t('reviewReason', { reason: t(`fallback_${r.reason}`) }))} · ${esc(t('reviewCommission', { amount: formatVnd(r.amount) }))}</p>
             ${billPhotoList(r.voucher?.billPhotos ?? [])}
