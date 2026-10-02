@@ -5,6 +5,7 @@ import { errorText, formatDateTime, formatVnd, getLang, groupDigits, t } from '.
 import { downloadBlob, partnerQrImage, referralLink, referralQrDataUrl, ruleDiscount, ruleTerms, sharePartnerQr, shortLink } from '../voucher-ui.js';
 import { icon } from '../nav.js';
 import { messageSlot, showLink, showMessage } from './common.js';
+import { historyBlock, mountHistory, openDialog, openPayout, payoutItem } from './history.js';
 import { billPhotoList } from './voucher-card.js';
 
 /** @typedef {import('../main.js').App} App */
@@ -373,11 +374,11 @@ function qrDialog(partner, { manage, onReplaced }) {
 }
 
 /**
- * Counts, and for roles that see commission: unpaid, paid and the "Mark as paid" button.
+ * Counts, and for roles that see commission: unpaid, paid, "Mark as paid", "Review bills" and "History".
  * @param {Partner} p
- * @param {boolean} settle
+ * @param {{ settle: boolean, history: boolean }} options
  */
-function partnerStatsLine(p, settle) {
+function partnerStatsLine(p, { settle, history }) {
   const stats = /** @type {NonNullable<Partner['stats']>} */ (p.stats);
   const money = stats.commissionOpen !== undefined;
   const unpaid = money && stats.commissionOpen !== '0.0000';
@@ -388,6 +389,7 @@ function partnerStatsLine(p, settle) {
   const buttons = [
     settle && unpaid ? `<button type="button" class="btn btn-sm btn-primary" data-action="pay" data-id="${esc(p.id)}">${esc(t('markPaid'))}</button>` : '',
     settle && pending ? `<button type="button" class="btn btn-sm btn-outline-secondary" data-action="review" data-id="${esc(p.id)}">${esc(t('reviewOpen'))}</button>` : '',
+    history && money ? `<button type="button" class="btn btn-sm btn-outline-secondary" data-action="history" data-id="${esc(p.id)}">${esc(t('historyButton'))}</button>` : '',
   ].join('');
   return `
     <dl class="partner-stats">
@@ -480,10 +482,41 @@ async function reviewDialog(partner, onChanged) {
 }
 
 /**
- * @param {Partner} p
- * @param {{ manage: boolean, settle: boolean, showMerchant: boolean }} options
+ * Bills of one partner (unpaid, waiting, paid, voided) with voucher codes, then its payments.
+ * @param {Partner} partner
  */
-function partnerCard(p, { manage, settle, showMerchant }) {
+function historyDialog(partner) {
+  const base = `/api/v1/partners/${encodeURIComponent(partner.id)}`;
+  const dialog = openDialog(
+    `
+    <h2 class="h5 mb-3 pe-4">${esc(t('historyDialogTitle', { name: partner.name }))}</h2>
+    <h3 class="card-title">${esc(t('historyBills'))}</h3>
+    ${historyBlock('ph')}
+    <h3 class="card-title mt-4">${esc(t('historyPayments'))}</h3>
+    <ul class="payout-list" id="ph-payouts"></ul>`,
+    { wide: true },
+  );
+  mountHistory(dialog, 'ph', {
+    url: `${base}/history`,
+    withCode: true,
+    onFirstPage: (data) => {
+      if (!data.payouts) return;
+      /** @type {HTMLElement} */ (dialog.querySelector('#ph-payouts')).innerHTML = data.payouts.length
+        ? data.payouts.map(payoutItem).join('')
+        : `<li class="small text-muted">${esc(t('historyNoPayments'))}</li>`;
+    },
+  });
+  dialog.querySelector('#ph-payouts')?.addEventListener('click', (event) => {
+    const id = /** @type {HTMLElement} */ (event.target).closest('[data-payout]')?.getAttribute('data-payout');
+    if (id) openPayout(`${base}/payouts/${encodeURIComponent(id)}`, true).catch((error) => showMessage(errorText(error), 'error', 'ph-message'));
+  });
+}
+
+/**
+ * @param {Partner} p
+ * @param {{ manage: boolean, settle: boolean, history: boolean, showMerchant: boolean }} options
+ */
+function partnerCard(p, { manage, settle, history, showMerchant }) {
   const rule = p.rule
     ? `<p class="partner-terms small">
          <span class="fw-semibold">${esc(t('ruleShort', ruleTerms(p.rule)))}</span>
@@ -522,7 +555,7 @@ function partnerCard(p, { manage, settle, showMerchant }) {
         ? `<div class="partner-actions">${qrButton}</div>`
         : '';
   return `
-    <article class="partner-card${p.status === 'ENDED' ? ' is-ended' : ''}">
+    <article class="partner-card${p.status === 'ENDED' ? ' is-ended' : ''}" id="partner-${esc(p.id)}">
       <header class="partner-head">
         <div>
           <h3 class="partner-name">${esc(p.name)}</h3>
@@ -533,7 +566,7 @@ function partnerCard(p, { manage, settle, showMerchant }) {
         <span class="pill pill-${esc(p.status.toLowerCase())}">${esc(t(`status_${p.status}`))}</span>
       </header>
       ${rule}
-      ${p.stats ? partnerStatsLine(p, settle) : ''}
+      ${p.stats ? partnerStatsLine(p, { settle, history }) : ''}
       ${contact ? `<p class="small text-muted mb-0">${esc(contact)}</p>` : ''}
       ${p.endReason ? `<p class="small text-muted mb-0">${esc(t('endPartner'))}: ${esc(p.endReason)}</p>` : ''}
       <div class="small partner-accounts"><span class="text-muted d-block mb-1">${esc(t('partnerAccounts'))}</span>${accounts}</div>
@@ -546,14 +579,24 @@ export function mountPartners(app) {
   const profile = /** @type {import('../api.js').Profile} */ (app.state.profile);
   const manage = profile.permissions.includes('partner.manage');
   const settle = profile.permissions.includes('commission.settle');
+  const history = profile.permissions.includes('commission.list');
   const showMerchant = !profile.activeRole?.tenantId;
   /** @type {Partner[]} */
   let partners = [];
 
   const renderRows = () => {
     $('#partner-rows').innerHTML = partners.length
-      ? partners.map((p) => partnerCard(p, { manage, settle, showMerchant })).join('')
+      ? partners.map((p) => partnerCard(p, { manage, settle, history, showMerchant })).join('')
       : `<p class="text-muted mb-0">${esc(t('noPartners'))}</p>`;
+  };
+
+  /** From the Overview work list: /console/partners?partner=<id> brings that card into view. */
+  const showTarget = () => {
+    const id = new URLSearchParams(location.search).get('partner');
+    const card = id ? document.getElementById(`partner-${id}`) : null;
+    if (!card) return;
+    card.classList.add('is-target');
+    card.scrollIntoView({ block: 'center' });
   };
 
   /** @param {boolean} open */
@@ -574,6 +617,7 @@ export function mountPartners(app) {
       partners = (await api('GET', '/api/v1/partners')).partners;
       renderRows();
       if (firstLoad && manage && !partners.length) $('#partner-create-card').hidden = false;
+      if (firstLoad) showTarget();
       firstLoad = false;
     } catch (error) {
       showMessage(errorText(error), 'error', 'partner-message');
@@ -644,6 +688,30 @@ export function mountPartners(app) {
       return;
     }
 
+    if (action === 'history') {
+      historyDialog(partner);
+      return;
+    }
+
+    if (action === 'pay') {
+      const amount = formatVnd(partner.stats?.commissionOpen ?? '0');
+      formDialog({
+        title: t('markPaidTitle', { name: partner.name }),
+        body: `
+          <p class="small">${esc(t('markPaidConfirm', { name: partner.name, amount }))}</p>
+          <label for="d-pay-note" class="form-label small">${optionalLabel(t('markPaidNote'))}</label>
+          <textarea id="d-pay-note" name="note" class="form-control" rows="2" maxlength="300"></textarea>
+          <p class="small text-muted mt-1 mb-0">${esc(t('markPaidNoteHint'))}</p>`,
+        submit: t('markPaid'),
+        onSubmit: async (form) => {
+          const { payout } = await api('POST', `${path}/payouts`, { note: formValues(form).note });
+          showMessage(t('markPaidDone', { name: partner.name, amount: formatVnd(payout.amount) }), 'success', 'partner-message');
+          await load();
+        },
+      });
+      return;
+    }
+
     if (action === 'qr') {
       qrDialog(partner, {
         manage,
@@ -705,12 +773,7 @@ export function mountPartners(app) {
     }
 
     try {
-      if (action === 'pay') {
-        const amount = formatVnd(partner.stats?.commissionOpen ?? '0');
-        if (!confirm(t('markPaidConfirm', { name: partner.name, amount }))) return;
-        const { payout } = await api('POST', `${path}/payouts`, {});
-        showMessage(t('markPaidDone', { name: partner.name, amount: formatVnd(payout.amount) }), 'success', 'partner-message');
-      } else if (action === 'pause') {
+      if (action === 'pause') {
         if (!confirm(t('partnerPauseConfirm', { name: partner.name }))) return;
         await api('POST', `${path}/status`, { status: 'PAUSED' });
       } else if (action === 'resume') {
