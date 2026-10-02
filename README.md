@@ -101,6 +101,15 @@ pnpm test                 # all packages
 pnpm test:permission      # only @permission tests
 ```
 
+Browser tests (Playwright, Chromium, 390 × 844 plus a 1280 × 800 layout project) also use only `.env.test`:
+they reset and seed `connect_test`, start the API on port 3100 and the web app on 5180 (a dev server on
+3000/5173 keeps running), and save one session per seed account in `e2e/.auth`:
+
+```bash
+pnpm exec playwright install chromium   # once
+pnpm test:e2e                           # report and traces on failure in test-results/
+```
+
 ## Branches
 
 `feature/<issue>-<name>` → `develop` → `uat` (auto-deploys to Vercel `connect-uat`) → `master` (manual promotion).
