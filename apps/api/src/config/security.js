@@ -35,8 +35,9 @@ export const RATE_LIMITS = Object.freeze({
   resetRequestIp: { max: 10, windowMs: HOUR },
   tokenIp: { max: 10, windowMs: 15 * MINUTE },
   passwordChangeUser: { max: 5, windowMs: 15 * MINUTE },
-  merchantApplicationIp: { max: 5, windowMs: HOUR },
-  merchantApplicationEmail: { max: 3, windowMs: DAY },
+  // Merchant and partner applications share these counters.
+  applicationIp: { max: 5, windowMs: HOUR },
+  applicationEmail: { max: 3, windowMs: DAY },
   publicVoucherIp: { max: 60, windowMs: 15 * MINUTE },
   publicReferralIp: { max: 60, windowMs: 15 * MINUTE },
   referralActivateIp: { max: 20, windowMs: 15 * MINUTE },

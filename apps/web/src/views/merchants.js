@@ -16,8 +16,19 @@ import { openDialog } from './history.js';
  * @typedef {{
  *   id: string, name: string, slug: string, contactEmail: string | null, contactPhone: string | null, address: string | null,
  *   admin: { email: string, displayName: string, preferredLanguage: 'en' | 'vi' }, createdAt: string,
- * }} Application
+ * }} MerchantApplication
+ * @typedef {{
+ *   id: string, relationshipKind: 'COMPANY' | 'INDEPENDENT_INDIVIDUAL', partnerType: string, name: string,
+ *   contactName: string | null, phone: string | null, email: string, preferredLanguage: 'en' | 'vi',
+ *   note: string | null, createdAt: string,
+ * }} PartnerApplication
+ * @typedef {({ type: 'merchant' } & MerchantApplication) | ({ type: 'partner' } & PartnerApplication)} Application
+ * @typedef {'all' | 'merchant' | 'partner'} ApplicationFilter
  */
+
+/** @type {ApplicationFilter[]} */
+const FILTERS = ['all', 'merchant', 'partner'];
+const FILTER_LABELS = { all: 'filterAll', merchant: 'filterMerchants', partner: 'filterPartners' };
 
 /** @param {string} id */
 function languageSelect(id) {
@@ -38,6 +49,13 @@ export function merchantsPanel() {
         <span>${esc(t('applicationsTitle'))}</span>
         <span class="count-badge" id="applications-count" hidden></span>
       </h2>
+      <div class="application-filter" role="radiogroup" aria-label="${esc(t('applicationsFilter'))}">
+        ${FILTERS.map(
+          (filter) => `
+          <input type="radio" class="btn-check" name="applicationFilter" id="application-filter-${filter}" value="${filter}"${filter === 'all' ? ' checked' : ''} />
+          <label for="application-filter-${filter}">${esc(t(FILTER_LABELS[filter]))} <span class="filter-count" data-filter-count="${filter}"></span></label>`,
+        ).join('')}
+      </div>
       <div id="application-list" class="application-list"></div>
       ${messageSlot('application-message')}
     </section>
@@ -150,9 +168,9 @@ function showInvitation(message, invitation, name, boxId, slotId) {
 /**
  * Sign-in email, temporary password (shown once, with a copy button) and its expiry.
  * @param {HTMLDialogElement} dialog
- * @param {{ title: string, intro: string, email: string, temporaryPassword: string, expiresAt: string, emailSent: boolean }} content
+ * @param {{ title: string, intro: string, email: string, temporaryPassword: string, expiresAt: string, emailSent: boolean, notSentText?: string }} content
  */
-function showCredentials(dialog, { title, intro, email, temporaryPassword, expiresAt, emailSent }) {
+function showCredentials(dialog, { title, intro, email, temporaryPassword, expiresAt, emailSent, notSentText = t('emailNotSentCopy') }) {
   const inner = /** @type {HTMLElement} */ (dialog.querySelector('.vdialog-inner'));
   inner.innerHTML = `
     <button type="button" class="btn-close vdialog-close" data-close aria-label="${esc(t('close'))}"></button>
@@ -171,7 +189,7 @@ function showCredentials(dialog, { title, intro, email, temporaryPassword, expir
       <dt>${esc(t('expires'))}</dt>
       <dd>${esc(formatDateTime(expiresAt))}</dd>
     </dl>
-    <p class="small mb-1" data-email-status>${esc(emailSent ? t('emailSentTo', { email }) : t('emailNotSentCopy'))}</p>
+    <p class="small mb-1" data-email-status>${esc(emailSent ? t('emailSentTo', { email }) : notSentText)}</p>
     <p class="small text-muted mb-3">${esc(t('temporaryPasswordOnce'))}</p>
     <button type="button" class="btn btn-primary w-100" data-close>${esc(t('done'))}</button>`;
   const copy = /** @type {HTMLButtonElement} */ (inner.querySelector('[data-copy-password]'));
@@ -188,19 +206,41 @@ export function mountMerchants(_app) {
   /** @type {Application[]} */
   let applications = [];
 
+  /** @type {ApplicationFilter} */
+  let filter = 'all';
+
+  /** @param {Application} a */
+  const applicationDetails = (a) => {
+    const badge = `<span class="type-badge" data-type="${a.type}">${esc(t(a.type === 'partner' ? 'applicationTypePartner' : 'applicationTypeMerchant'))}</span>`;
+    if (a.type === 'merchant') {
+      return `
+            <h3 class="h6 mb-1">${badge}${esc(a.name)}</h3>
+            <p class="small text-muted mb-1 text-break">${esc([a.contactPhone, a.contactEmail, a.address].filter(Boolean).join(' · ') || a.slug)}</p>
+            <p class="small mb-1 text-break">${esc(t('applicationAdmin', { name: a.admin.displayName, email: a.admin.email, lang: a.admin.preferredLanguage.toUpperCase() }))}</p>`;
+    }
+    return `
+            <h3 class="h6 mb-1">${badge}${esc(a.name)}</h3>
+            <p class="small text-muted mb-1">${esc(`${t(`ptype_${a.partnerType}`)} · ${t(`kind_${a.relationshipKind}`)}`)}</p>
+            <p class="small mb-1 text-break">${esc([a.contactName ? t('applicationContact', { name: a.contactName }) : null, a.phone, a.email, a.preferredLanguage.toUpperCase()].filter(Boolean).join(' · '))}</p>
+            ${a.note ? `<p class="small text-muted mb-1 text-break">${esc(a.note)}</p>` : ''}`;
+  };
+
   const renderApplications = () => {
     const count = $('#applications-count');
     count.hidden = applications.length === 0;
     count.textContent = String(applications.length);
-    $('#application-list').innerHTML = applications.length
-      ? applications
+    for (const key of FILTERS) {
+      const n = key === 'all' ? applications.length : applications.filter((a) => a.type === key).length;
+      $(`[data-filter-count="${key}"]`).textContent = String(n);
+    }
+    const shown = filter === 'all' ? applications : applications.filter((a) => a.type === filter);
+    $('#application-list').innerHTML = shown.length
+      ? shown
           .map(
             (a) => `
-        <article class="application" data-application="${esc(a.id)}">
+        <article class="application" data-application="${esc(a.id)}" data-type="${a.type}">
           <div class="application-main">
-            <h3 class="h6 mb-1">${esc(a.name)}</h3>
-            <p class="small text-muted mb-1 text-break">${esc([a.contactPhone, a.contactEmail, a.address].filter(Boolean).join(' · ') || a.slug)}</p>
-            <p class="small mb-1 text-break">${esc(t('applicationAdmin', { name: a.admin.displayName, email: a.admin.email, lang: a.admin.preferredLanguage.toUpperCase() }))}</p>
+            ${applicationDetails(a)}
             <p class="small text-muted mb-0">${esc(t('applicationSubmitted', { date: formatDateTime(a.createdAt) }))}</p>
           </div>
           <div class="application-actions">
@@ -215,15 +255,67 @@ export function mountMerchants(_app) {
 
   const loadApplications = async () => {
     try {
-      applications = (await api('GET', '/api/v1/merchant-applications?status=PENDING')).applications;
+      const [merchantList, partnerList] = await Promise.all([
+        api('GET', '/api/v1/merchant-applications?status=PENDING'),
+        api('GET', '/api/v1/partner-applications?status=PENDING'),
+      ]);
+      applications = [
+        ...merchantList.applications.map((/** @type {MerchantApplication} */ a) => ({ ...a, type: 'merchant' })),
+        ...partnerList.applications.map((/** @type {PartnerApplication} */ a) => ({ ...a, type: 'partner' })),
+      ].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
       renderApplications();
     } catch (error) {
       showMessage(errorText(error), 'error', 'application-message');
     }
   };
 
-  /** @param {Application} a */
-  const approve = (a) => {
+  $('#applications').querySelectorAll('input[name="applicationFilter"]').forEach((radio) => {
+    radio.addEventListener('change', () => {
+      filter = /** @type {ApplicationFilter} */ (/** @type {HTMLInputElement} */ (radio).value);
+      renderApplications();
+    });
+  });
+
+  /** @param {PartnerApplication} a */
+  const approvePartner = (a) => {
+    const dialog = openDialog(`
+      <form id="approve-form" novalidate>
+        <h2 class="h5 mb-2 pe-4">${esc(t('approveTitle', { name: a.name }))}</h2>
+        <p class="small mb-1">${esc(`${t(`ptype_${a.partnerType}`)} · ${t(`kind_${a.relationshipKind}`)}`)}</p>
+        <p class="small mb-3">${esc(t('partnerApproveIntro', { email: a.email }))}</p>
+        ${messageSlot('approve-message')}
+        <div class="d-flex gap-2 mt-3">
+          <button type="button" class="btn btn-outline-secondary flex-fill" data-close>${esc(t('cancel'))}</button>
+          <button type="submit" class="btn btn-primary flex-fill">${esc(t('approve'))}</button>
+        </div>
+      </form>`);
+    const form = /** @type {HTMLFormElement} */ (dialog.querySelector('form'));
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      busy(form, async () => {
+        try {
+          const result = await api('POST', `/api/v1/partner-applications/${encodeURIComponent(a.id)}/approve`, {});
+          showCredentials(dialog, {
+            title: t('partnerApprovedTitle'),
+            intro: t('approvedIntro', { name: a.contactName || a.name }),
+            email: result.user.email,
+            temporaryPassword: result.temporaryPassword,
+            expiresAt: result.expiresAt,
+            emailSent: result.emailSent === true,
+            notSentText: t('emailNotSentCopyPartner'),
+          });
+          showMessage(t('partnerApproved', { name: result.profile.name }), 'success', 'application-message');
+          await loadApplications();
+        } catch (error) {
+          showMessage(errorText(error), 'error', 'approve-message');
+        }
+      });
+    });
+    /** @type {HTMLButtonElement} */ (form.querySelector('[type="submit"]')).focus();
+  };
+
+  /** @param {MerchantApplication} a */
+  const approveMerchant = (a) => {
     const dialog = openDialog(`
       <form id="approve-form" novalidate>
         <h2 class="h5 mb-2 pe-4">${esc(t('approveTitle', { name: a.name }))}</h2>
@@ -295,9 +387,10 @@ export function mountMerchants(_app) {
       }
       busy(form, async () => {
         try {
-          const result = await api('POST', `/api/v1/merchant-applications/${encodeURIComponent(a.id)}/reject`, { reason });
+          const result = await api('POST', `/api/v1/${a.type}-applications/${encodeURIComponent(a.id)}/reject`, { reason });
           dialog.close();
-          const emailNote = result.emailSent === true ? t('emailSentTo', { email: a.admin.email }) : t('emailNotSentTell');
+          const applicantEmail = a.type === 'merchant' ? a.admin.email : a.email;
+          const emailNote = result.emailSent === true ? t('emailSentTo', { email: applicantEmail }) : t('emailNotSentTell');
           showMessage(`${t('applicationRejected', { name: a.name, reason: result.application.rejectReason })} ${emailNote}`, 'success', 'application-message');
           await loadApplications();
         } catch (error) {
@@ -312,8 +405,9 @@ export function mountMerchants(_app) {
     const button = /** @type {HTMLElement} */ (event.target).closest('button');
     const a = applications.find((item) => item.id === (button?.getAttribute('data-approve') ?? button?.getAttribute('data-reject')));
     if (!button || !a) return;
-    if (button.hasAttribute('data-approve')) approve(a);
-    else reject(a);
+    if (!button.hasAttribute('data-approve')) reject(a);
+    else if (a.type === 'merchant') approveMerchant(a);
+    else approvePartner(a);
   });
 
   /** @param {string} userId @param {string} email */

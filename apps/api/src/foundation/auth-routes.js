@@ -1,4 +1,4 @@
-import { LANDING, passwordPolicyErrors, permissionsFor } from '#domain';
+import { LANDING, PARTNER_WELCOME_PATH, passwordPolicyErrors, permissionsFor } from '#domain';
 import { recordAudit } from '../audit/audit.js';
 import { authed } from '../auth/guard.js';
 import { hashPassword, verifyPassword } from '../auth/password.js';
@@ -19,15 +19,18 @@ import { withTransaction } from '../db/tx.js';
 import { HttpError } from '../http/errors.js';
 import { clientIp, readJson, stringField } from '../http/request.js';
 import { sendJson } from '../http/respond.js';
+import { hasActivePartnerProfile } from '../partners/profile-routes.js';
 
 /**
  * Payload for the web: who is signed in, which role is active, what it may do and where it lands.
  * `mustChangePassword`: signed in with a temporary password; nothing else works until it is changed.
+ * `partnerProfile`: an approved partner; without any role yet (no merchant) it lands on the partner welcome page.
  * @param {{ userId: string, email: string, displayName: string, preferredLanguage: string, mustChangePassword?: boolean }} user
  * @param {import('../auth/session.js').RoleOption[]} roles
  * @param {string | null} roleAssignmentId
+ * @param {boolean} partnerProfile
  */
-function profile(user, roles, roleAssignmentId) {
+function profile(user, roles, roleAssignmentId, partnerProfile) {
   const active = roles.find((option) => option.roleAssignmentId === roleAssignmentId) ?? null;
   return {
     user: {
@@ -40,9 +43,19 @@ function profile(user, roles, roleAssignmentId) {
     activeRole: active,
     roles,
     permissions: permissionsFor(active?.role),
-    landing: active ? LANDING[active.role] : null,
+    landing: active ? LANDING[active.role] : roles.length === 0 && partnerProfile ? PARTNER_WELCOME_PATH : null,
     needsRoleSelection: !active && roles.length > 1,
+    partnerProfile,
   };
+}
+
+/**
+ * @param {Parameters<typeof profile>[0]} user
+ * @param {string | null} roleAssignmentId
+ */
+async function currentProfile(user, roleAssignmentId) {
+  const [roles, partnerProfile] = await Promise.all([activeRoles(user.userId), hasActivePartnerProfile(user.userId)]);
+  return profile(user, roles, roleAssignmentId, partnerProfile);
 }
 
 const invalidCredentials = () => new HttpError(401, 'INVALID_CREDENTIALS', 'Email or password is incorrect');
@@ -115,8 +128,9 @@ async function login(req, res, ctx) {
     throw new HttpError(401, 'TEMP_PASSWORD_EXPIRED', 'This temporary password has expired. Ask the platform admin for a new one.');
   }
 
-  const roles = await activeRoles(account._id);
-  if (roles.length === 0) throw new HttpError(403, 'NO_ACTIVE_ROLE', 'This account has no active role');
+  const [roles, partnerProfile] = await Promise.all([activeRoles(account._id), hasActivePartnerProfile(account._id)]);
+  // An approved partner who has joined no merchant yet signs in without a role.
+  if (roles.length === 0 && !partnerProfile) throw new HttpError(403, 'NO_ACTIVE_ROLE', 'This account has no active role');
 
   // One role: use it. Several: the user must choose; never pick the highest (C3).
   const chosen = roles.length === 1 ? roles[0] : null;
@@ -146,7 +160,7 @@ async function login(req, res, ctx) {
     preferredLanguage: account.preferredLanguage,
     mustChangePassword,
   };
-  sendJson(res, 200, profile(user, roles, chosen?.roleAssignmentId ?? null), { 'Set-Cookie': cookie });
+  sendJson(res, 200, profile(user, roles, chosen?.roleAssignmentId ?? null, partnerProfile), { 'Set-Cookie': cookie });
 }
 
 /**
@@ -193,8 +207,7 @@ async function changePassword(req, res, ctx) {
       { session: tx },
     );
   });
-  const roles = await activeRoles(session.userId);
-  sendJson(res, 200, profile({ ...session, mustChangePassword: false }, roles, session.roleAssignmentId));
+  sendJson(res, 200, await currentProfile({ ...session, mustChangePassword: false }, session.roleAssignmentId));
 }
 
 /** @type {import('../http/router.js').Handler} */
@@ -218,8 +231,7 @@ async function logout(req, res, ctx) {
 /** @type {import('../http/router.js').Handler} */
 async function me(_req, res, ctx) {
   const session = /** @type {import('../auth/session.js').Session} */ (ctx.session);
-  const roles = await activeRoles(session.userId);
-  sendJson(res, 200, profile(session, roles, session.roleAssignmentId));
+  sendJson(res, 200, await currentProfile(session, session.roleAssignmentId));
 }
 
 /** @type {import('../http/router.js').Handler} */
@@ -260,7 +272,7 @@ async function selectRole(req, res, ctx) {
     );
     return created;
   });
-  sendJson(res, 200, profile(session, roles, chosen.roleAssignmentId), { 'Set-Cookie': cookie });
+  sendJson(res, 200, profile(session, roles, chosen.roleAssignmentId, await hasActivePartnerProfile(session.userId)), { 'Set-Cookie': cookie });
 }
 
 const invalidInvitation = () =>

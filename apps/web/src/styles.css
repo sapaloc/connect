@@ -218,6 +218,42 @@ body {
   }
 }
 
+.register-type {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin-bottom: 20px;
+}
+
+.register-type label {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  margin: 0;
+  border: 1px solid var(--sw-line);
+  border-radius: 999px;
+  color: var(--sw-ink2);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.register-type .btn-check:checked + label {
+  border-color: var(--sw-acc);
+  background: var(--sw-acc-soft);
+  color: var(--sw-ink);
+}
+
+.register-type .btn-check:focus-visible + label {
+  outline: 2px solid var(--sw-acc);
+  outline-offset: 2px;
+}
+
+#pane-register[data-type='merchant'] [data-register='partner'],
+#pane-register[data-type='partner'] [data-register='merchant'] {
+  display: none;
+}
+
 .hp-field {
   position: absolute;
   left: -10000px;
@@ -805,6 +841,105 @@ a.brand:hover {
   .application-actions .btn {
     min-height: 36px;
   }
+}
+
+.application-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.application-filter label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  margin: 0;
+  padding: 0 14px;
+  border: 1px solid var(--sw-line);
+  border-radius: 999px;
+  color: var(--sw-ink2);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.application-filter .btn-check:checked + label {
+  border-color: var(--sw-acc);
+  background: var(--sw-acc-soft);
+  color: var(--sw-ink);
+}
+
+.application-filter .btn-check:focus-visible + label {
+  outline: 2px solid var(--sw-acc);
+  outline-offset: 2px;
+}
+
+.application-filter .filter-count {
+  color: var(--sw-ink3);
+  font-weight: 500;
+}
+
+.type-badge {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--sw-line);
+  color: var(--sw-ink2);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  vertical-align: 2px;
+}
+
+.type-badge[data-type='partner'] {
+  border-color: var(--sw-info);
+  color: var(--sw-info);
+}
+
+.forest-dark .type-badge[data-type='partner'] {
+  border-color: #7fc2a6;
+  color: #7fc2a6;
+}
+
+.partner-card {
+  margin-bottom: 16px;
+  padding: 16px;
+  border: 1px solid var(--sw-line);
+  border-radius: 12px;
+}
+
+.partner-card .profile-facts {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 12px;
+  margin: 0 0 12px;
+  font-size: 14px;
+}
+
+.partner-card .profile-facts dt {
+  color: var(--sw-ink3);
+  font-weight: 500;
+}
+
+.partner-card .profile-facts dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.soon-badge {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--sw-acc-soft);
+  color: var(--sw-ink);
+  font-size: 12px;
+  font-weight: 600;
+  vertical-align: 2px;
 }
 
 .credentials {

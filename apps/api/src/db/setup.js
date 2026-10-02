@@ -9,7 +9,7 @@ import { closeClient, COLLECTIONS, getDb } from './mongo.js';
  * Bump when a validator or index changes. Changes must keep old documents valid
  * (add optional fields; backfill in a script before making a field required).
  */
-export const SCHEMA_VERSION = 11;
+export const SCHEMA_VERSION = 12;
 
 const DAY_SECONDS = 24 * 60 * 60;
 const uuid = { bsonType: 'string', pattern: '^[0-9a-f-]{36}$' };
@@ -574,6 +574,67 @@ const DEFINITIONS = {
       { key: { 'admin.email': 1 }, name: 'pending_email_uq', unique: true, partialFilterExpression: { status: 'PENDING' } },
       { key: { slug: 1 }, name: 'pending_slug_uq', unique: true, partialFilterExpression: { status: 'PENDING' } },
       { key: { status: 1, createdAt: 1 }, name: 'status_created' },
+    ],
+  },
+
+  // A hotel, restaurant, guide or driver asking to join from the sign-in page; approval creates the account and its partner profile.
+  [COLLECTIONS.partnerApplications]: {
+    schema: {
+      bsonType: 'object',
+      required: ['_id', 'status', 'relationshipKind', 'partnerType', 'name', 'email', 'preferredLanguage', 'termsAcceptedAt', 'createdAt', 'updatedAt'],
+      properties: {
+        _id: uuid,
+        status: { enum: ['PENDING', 'APPROVED', 'REJECTED'] },
+        relationshipKind: { enum: ['COMPANY', 'INDEPENDENT_INDIVIDUAL'] },
+        partnerType: { enum: ['HOTEL', 'RESTAURANT', 'TOUR_GUIDE', 'DRIVER', 'OTHER'] },
+        name: text,
+        contactName: { bsonType: ['string', 'null'] },
+        phone: { bsonType: ['string', 'null'] },
+        email: { bsonType: 'string', pattern: '^[^A-Z]+$' },
+        preferredLanguage: { enum: ['en', 'vi'] },
+        note: { bsonType: ['string', 'null'] },
+        termsAcceptedAt: date,
+        createdAt: date,
+        updatedAt: date,
+        reviewedBy: nullableUuid,
+        reviewedAt: nullableDate,
+        rejectReason: { bsonType: ['string', 'null'] },
+        userId: nullableUuid,
+        profileId: nullableUuid,
+      },
+    },
+    indexes: [
+      { key: { email: 1 }, name: 'pending_email_uq', unique: true, partialFilterExpression: { status: 'PENDING' } },
+      { key: { status: 1, createdAt: 1 }, name: 'status_created' },
+    ],
+  },
+
+  // The partner side of an account before (and after) it joins merchants; `partners` rows belong to one merchant each.
+  [COLLECTIONS.partnerProfiles]: {
+    schema: {
+      bsonType: 'object',
+      required: ['_id', 'userId', 'relationshipKind', 'partnerType', 'name', 'email', 'preferredLanguage', 'status', 'createdAt', 'updatedAt'],
+      properties: {
+        _id: uuid,
+        userId: uuid,
+        relationshipKind: { enum: ['COMPANY', 'INDEPENDENT_INDIVIDUAL'] },
+        partnerType: { enum: ['HOTEL', 'RESTAURANT', 'TOUR_GUIDE', 'DRIVER', 'OTHER'] },
+        name: text,
+        contactName: { bsonType: ['string', 'null'] },
+        phone: { bsonType: ['string', 'null'] },
+        email: { bsonType: 'string', pattern: '^[^A-Z]+$' },
+        preferredLanguage: { enum: ['en', 'vi'] },
+        note: { bsonType: ['string', 'null'] },
+        status: { enum: ['ACTIVE', 'PAUSED', 'ENDED'] },
+        applicationId: nullableUuid,
+        approvedBy: nullableUuid,
+        createdAt: date,
+        updatedAt: date,
+      },
+    },
+    indexes: [
+      { key: { userId: 1 }, name: 'user_uq', unique: true },
+      { key: { status: 1, partnerType: 1 }, name: 'status_type' },
     ],
   },
 

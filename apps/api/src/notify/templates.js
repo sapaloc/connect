@@ -2,7 +2,7 @@
  * @typedef {'en' | 'vi'} Language
  * @typedef {{
  *   name?: string, displayName?: string, email?: string, applicantEmail?: string, reason?: string,
- *   temporaryPassword?: string, expiresAt?: string, origin?: string,
+ *   temporaryPassword?: string, expiresAt?: string, origin?: string, partnerType?: string, relationshipKind?: string,
  * }} EmailData
  * @typedef {{
  *   subject: string, greeting?: string, paragraphs: string[], details?: Array<[string, string]>,
@@ -53,8 +53,95 @@ function credentials(d, language) {
       };
 }
 
+const PARTNER_LABELS = {
+  en: {
+    HOTEL: 'Hotel', RESTAURANT: 'Restaurant', TOUR_GUIDE: 'Tour guide', DRIVER: 'Driver', OTHER: 'Other',
+    COMPANY: 'Company', INDEPENDENT_INDIVIDUAL: 'Individual',
+  },
+  vi: {
+    HOTEL: 'Khách sạn', RESTAURANT: 'Nhà hàng', TOUR_GUIDE: 'Hướng dẫn viên', DRIVER: 'Tài xế', OTHER: 'Khác',
+    COMPANY: 'Công ty', INDEPENDENT_INDIVIDUAL: 'Cá nhân',
+  },
+};
+
+/** "Hotel · Company". @param {EmailData} d @param {Language} language */
+function partnerKind(d, language) {
+  const labels = /** @type {Record<string, string>} */ (PARTNER_LABELS[language]);
+  return [d.partnerType, d.relationshipKind].map((key) => labels[key ?? ''] ?? key ?? '').filter(Boolean).join(' · ');
+}
+
 /** @type {Record<string, Record<Language, (d: EmailData) => EmailContent>>} */
 const TEMPLATES = {
+  PARTNER_APPLICATION_RECEIVED: {
+    en: (d) => ({
+      subject: 'We received your partner application',
+      greeting: `Hello ${d.displayName},`,
+      paragraphs: [
+        `Thank you for applying to become a MyConnect partner (${d.name}). A platform admin will review your application.`,
+        'What happens next: no account is created yet. If the application is approved, you will get another email with your sign-in details. If not, we will tell you why.',
+      ],
+    }),
+    vi: (d) => ({
+      subject: 'Chúng tôi đã nhận đơn đăng ký partner của bạn',
+      greeting: `Xin chào ${d.displayName},`,
+      paragraphs: [
+        `Cảm ơn bạn đã đăng ký làm partner MyConnect (${d.name}). Quản trị nền tảng sẽ xem xét đơn của bạn.`,
+        'Bước tiếp theo: chưa có tài khoản nào được tạo. Khi đơn được duyệt, bạn sẽ nhận một email khác với thông tin đăng nhập. Nếu đơn không được duyệt, chúng tôi sẽ báo lý do.',
+      ],
+    }),
+  },
+  PARTNER_APPLICATION_NEW_FOR_ADMINS: {
+    en: (d) => ({
+      subject: `New partner application: ${d.name}`,
+      paragraphs: ['A new partner application is waiting for review.'],
+      details: [
+        ['Partner', d.name ?? ''],
+        ['Type', partnerKind(d, 'en')],
+        ['Contact', `${d.displayName} (${d.applicantEmail})`],
+      ],
+      link: { label: 'Review in Console → Merchants', url: `${d.origin}/console/merchants` },
+    }),
+    vi: (d) => ({
+      subject: `Đơn đăng ký partner mới: ${d.name}`,
+      paragraphs: ['Có một đơn đăng ký partner mới đang chờ duyệt.'],
+      details: [
+        ['Partner', d.name ?? ''],
+        ['Loại', partnerKind(d, 'vi')],
+        ['Liên hệ', `${d.displayName} (${d.applicantEmail})`],
+      ],
+      link: { label: 'Duyệt tại Console → Merchant', url: `${d.origin}/console/merchants` },
+    }),
+  },
+  PARTNER_APPLICATION_APPROVED: {
+    en: (d) => ({
+      subject: 'Your MyConnect partner account is ready',
+      greeting: `Hello ${d.displayName},`,
+      paragraphs: [`Your partner application for ${d.name} was approved. Sign in with these details:`],
+      ...credentials(d, 'en'),
+    }),
+    vi: (d) => ({
+      subject: 'Tài khoản partner MyConnect của bạn đã sẵn sàng',
+      greeting: `Xin chào ${d.displayName},`,
+      paragraphs: [`Đơn đăng ký partner của ${d.name} đã được duyệt. Đăng nhập với thông tin sau:`],
+      ...credentials(d, 'vi'),
+    }),
+  },
+  PARTNER_APPLICATION_REJECTED: {
+    en: (d) => ({
+      subject: 'Your partner application was not approved',
+      greeting: `Hello ${d.displayName},`,
+      paragraphs: [`Thank you for your interest in MyConnect. Your partner application for ${d.name} was not approved.`],
+      details: [['Reason', d.reason ?? '']],
+      after: [`You can send a new application at any time: ${d.origin}/register?type=partner`],
+    }),
+    vi: (d) => ({
+      subject: 'Đơn đăng ký partner của bạn chưa được duyệt',
+      greeting: `Xin chào ${d.displayName},`,
+      paragraphs: [`Cảm ơn bạn đã quan tâm đến MyConnect. Đơn đăng ký partner của ${d.name} chưa được duyệt.`],
+      details: [['Lý do', d.reason ?? '']],
+      after: [`Bạn có thể gửi đơn mới bất cứ lúc nào: ${d.origin}/register?type=partner`],
+    }),
+  },
   APPLICATION_RECEIVED: {
     en: (d) => ({
       subject: `We received your application for ${d.name}`,
