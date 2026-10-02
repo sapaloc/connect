@@ -1,7 +1,7 @@
 import { formatVoucherCode, VOUCHER_BATCH_MAX } from '#domain';
 import { api } from '../api.js';
 import { $, busy, esc, formValues } from '../dom.js';
-import { errorText, formatDate, t } from '../i18n.js';
+import { errorText, formatDate, groupDigits, t } from '../i18n.js';
 import { discountText, downloadBlob, vouchersCsv } from '../voucher-ui.js';
 import { messageSlot, showMessage } from './common.js';
 import { bindVoucherActions, fillQr, openVoucherDialog, statusPill, voucherActions, voucherCard } from './voucher-card.js';
@@ -24,7 +24,7 @@ function issueForm() {
     <section class="card-sw">
       <h2 class="card-title">${esc(t('voucherCreateTitle'))}</h2>
       <p class="text-muted small mb-3">${esc(t('voucherCreateSubtitle'))}</p>
-      <form id="voucher-issue" class="row g-3" novalidate>
+      <form id="voucher-issue" class="row g-3 align-items-end" novalidate>
         <div class="col-12">
           <div class="btn-group w-100" role="group" aria-label="${esc(t('discount'))}">
             <input type="radio" class="btn-check" name="discountType" id="dt-percent" value="PERCENT" checked />
@@ -42,7 +42,7 @@ function issueForm() {
         </div>
         <div class="col-6 col-md-3">
           <label for="v-min" class="form-label small">${optionalLabel(t('minBill'))}</label>
-          <input id="v-min" name="minBillAmount" class="form-control" inputmode="numeric" />
+          <input id="v-min" name="minBillAmount" class="form-control" inputmode="numeric" maxlength="16" autocomplete="off" />
         </div>
         <div class="col-7 col-md-3">
           <label for="v-until" class="form-label small">${esc(t('validUntil'))}</label>
@@ -75,7 +75,7 @@ export function vouchersPanel(app) {
   const platform = profile.activeRole?.role === 'PLATFORM_ADMIN';
   return `
     ${profile.permissions.includes('voucher.issue') ? issueForm() : ''}
-    <section class="grid-kpi" id="voucher-kpis" aria-live="polite"></section>
+    <section class="grid-kpi grid-kpi-4" id="voucher-kpis" aria-live="polite"></section>
     <section class="card-sw">
       <h2 class="card-title">${esc(t('voucherListTitle'))}</h2>
       <div class="row g-2 mb-3">
@@ -236,10 +236,19 @@ export function mountVouchers(app) {
 
   const form = /** @type {HTMLFormElement | null} */ (document.getElementById('voucher-issue'));
   if (form) {
+    const value = /** @type {HTMLInputElement} */ ($('#v-value'));
+    const amountMode = () => formValues(form).discountType === 'AMOUNT';
     form.addEventListener('change', (event) => {
       if (/** @type {HTMLInputElement} */ (event.target).name === 'discountType') {
-        $('#v-unit').textContent = formValues(form).discountType === 'PERCENT' ? '%' : '₫';
+        const amount = amountMode();
+        $('#v-unit').textContent = amount ? '₫' : '%';
+        value.inputMode = amount ? 'numeric' : 'decimal';
+        value.value = amount ? groupDigits(value.value) : value.value.replace(/\D/g, '');
       }
+    });
+    form.addEventListener('input', (event) => {
+      const input = /** @type {HTMLInputElement} */ (event.target);
+      if (input.name === 'minBillAmount' || (input === value && amountMode())) input.value = groupDigits(input.value);
     });
     form.addEventListener('submit', (event) => {
       event.preventDefault();
@@ -260,6 +269,7 @@ export function mountVouchers(app) {
           showIssued(result.vouchers);
           form.reset();
           $('#v-unit').textContent = '%';
+          value.inputMode = 'decimal';
           /** @type {HTMLInputElement} */ ($('#v-until')).value = vnDate(30);
           await load();
         } catch (error) {

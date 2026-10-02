@@ -1,8 +1,8 @@
 import { fixedRuleFromAmounts, isFixedRule, PARTNER_TYPES, percentRuleFromPercents, PRICING_MODELS, ratePercent, toVnd } from '#domain';
 import { api } from '../api.js';
 import { $, busy, esc, formValues } from '../dom.js';
-import { errorText, formatDateTime, formatVnd, getLang, t } from '../i18n.js';
-import { downloadBlob, partnerQrImage, referralLink, referralQrDataUrl, ruleDiscount, ruleTerms, sharePartnerQr } from '../voucher-ui.js';
+import { errorText, formatDateTime, formatVnd, getLang, groupDigits, t } from '../i18n.js';
+import { downloadBlob, partnerQrImage, referralLink, referralQrDataUrl, ruleDiscount, ruleTerms, sharePartnerQr, shortLink } from '../voucher-ui.js';
 import { icon } from '../nav.js';
 import { messageSlot, showLink, showMessage } from './common.js';
 import { billPhotoList } from './voucher-card.js';
@@ -46,9 +46,6 @@ const MODELS = [PRICING_MODELS.FIXED_AMOUNT, PRICING_MODELS.PERCENT];
 /** @param {string} value typed amount, with or without thousands separators */
 const digitsOf = (value) => value.replace(/\D/g, '');
 
-/** @param {string} digits */
-const grouped = (digits) => (digits ? Number(digits).toLocaleString(getLang() === 'vi' ? 'vi-VN' : 'en-US') : '');
-
 /** @param {string} value typed percent; a comma works as the decimal point */
 const percentOf = (value) => value.replace(',', '.').replace(/[^\d.]/g, '');
 
@@ -59,7 +56,7 @@ const percentOf = (value) => value.replace(',', '.').replace(/[^\d.]/g, '');
  */
 function ruleFields(prefix, rule = null) {
   const model = rule && !isFixedRule(rule) ? PRICING_MODELS.PERCENT : PRICING_MODELS.FIXED_AMOUNT;
-  const amount = (/** @type {string | null | undefined} */ value) => (value && model === PRICING_MODELS.FIXED_AMOUNT ? grouped(toVnd(value)) : '');
+  const amount = (/** @type {string | null | undefined} */ value) => (value && model === PRICING_MODELS.FIXED_AMOUNT ? groupDigits(toVnd(value)) : '');
   const percent = (/** @type {string | null | undefined} */ rate) => (rate && model === PRICING_MODELS.PERCENT ? ratePercent(rate) : '');
   const commissionRate = rule?.companyCommissionRate ?? rule?.individualCommissionRate;
   /** @param {string} name @param {string} label @param {string} value @param {string} placeholder @param {string} mode */
@@ -97,7 +94,7 @@ function bindRulePreview(form, prefix, kindOf) {
   const preview = $(`#${prefix}-preview`, form);
   const update = (/** @type {Event} [event] */ event) => {
     const input = /** @type {HTMLInputElement | undefined} */ (event?.target);
-    if (input && AMOUNT_FIELDS.includes(input.name)) input.value = grouped(digitsOf(input.value));
+    if (input && AMOUNT_FIELDS.includes(input.name)) input.value = groupDigits(digitsOf(input.value));
     if (input && PERCENT_FIELDS.includes(input.name)) input.value = percentOf(input.value);
     const payload = rulePayload(form);
     const percent = payload.pricingModel === PRICING_MODELS.PERCENT;
@@ -318,7 +315,7 @@ function qrDialog(partner, { manage, onReplaced }) {
         <p class="small text-muted">${esc(t('partnerQrHint'))}</p>
         ${current.status === 'PAUSED' ? `<p class="form-message" data-tone="error">${esc(t('partnerQrPaused'))}</p>` : ''}
         <div class="partner-qr"><img alt="QR ${esc(current.name)}" width="240" height="240" /></div>
-        <p class="partner-qr-link small font-monospace text-center" translate="no">${esc(link)}</p>
+        <p class="partner-qr-link small font-monospace text-center" translate="no" title="${esc(link)}">${esc(shortLink(link))}</p>
         <div class="vcard-actions">
           <button type="button" class="btn btn-primary" data-qr-share>${esc(t('share'))}</button>
           <button type="button" class="btn btn-outline-secondary" data-qr-download>${esc(t('downloadImage'))}</button>
@@ -382,23 +379,36 @@ function qrDialog(partner, { manage, onReplaced }) {
  */
 function partnerStatsLine(p, settle) {
   const stats = /** @type {NonNullable<Partner['stats']>} */ (p.stats);
-  const counts = t('partnerCounts', { opens: stats.opens, activations: stats.activations, redemptions: stats.redemptions });
-  const unpaid = stats.commissionOpen !== undefined && stats.commissionOpen !== '0.0000';
+  const money = stats.commissionOpen !== undefined;
+  const unpaid = money && stats.commissionOpen !== '0.0000';
   const pending = stats.pendingReviews ?? 0;
+  /** @param {string} label @param {string | number} value @param {string} [extra] */
+  const stat = (label, value, extra = '') => `
+      <div class="partner-stat${extra}"><dt>${esc(label)}</dt><dd>${esc(String(value))}</dd></div>`;
+  const buttons = [
+    settle && unpaid ? `<button type="button" class="btn btn-sm btn-primary" data-action="pay" data-id="${esc(p.id)}">${esc(t('markPaid'))}</button>` : '',
+    settle && pending ? `<button type="button" class="btn btn-sm btn-outline-secondary" data-action="review" data-id="${esc(p.id)}">${esc(t('reviewOpen'))}</button>` : '',
+  ].join('');
   return `
-    <div class="small mb-1 partner-stats">
-      <span class="text-muted">${esc(counts)}</span>
-      ${
-        stats.commissionOpen !== undefined
-          ? `<span class="d-block">${esc(t('commissionOwed'))}: <strong>${esc(formatVnd(stats.commissionOpen))}</strong>
-             · ${esc(t('commissionPaid'))}: <strong>${esc(formatVnd(stats.commissionPaid ?? '0'))}</strong></span>
-             ${pending ? `<span class="d-block">${esc(t('commissionPendingLine', { amount: formatVnd(stats.commissionPending ?? '0'), count: pending }))}</span>` : ''}
-             ${stats.lastPaidAt ? `<span class="d-block text-muted">${esc(t('lastPaid', { date: formatDateTime(stats.lastPaidAt) }))}</span>` : ''}
-             ${settle && unpaid ? `<button type="button" class="btn btn-sm btn-primary mt-2" data-action="pay" data-id="${esc(p.id)}">${esc(t('markPaid'))}</button>` : ''}
-             ${settle && pending ? `<button type="button" class="btn btn-sm btn-outline-primary mt-2" data-action="review" data-id="${esc(p.id)}">${esc(t('reviewOpen'))}</button>` : ''}`
-          : ''
-      }
-    </div>`;
+    <dl class="partner-stats">
+      ${stat(t('kpiOpens'), stats.opens)}
+      ${stat(t('kpiActivations'), stats.activations)}
+      ${stat(t('kpiRedemptions'), stats.redemptions)}
+      ${money ? stat(t('commissionOwed'), formatVnd(stats.commissionOpen ?? '0'), ' is-money') : ''}
+      ${money ? stat(t('commissionPaid'), formatVnd(stats.commissionPaid ?? '0'), ' is-money') : ''}
+    </dl>
+    ${pending ? `<p class="partner-pending small">${esc(t('commissionPendingLine', { amount: formatVnd(stats.commissionPending ?? '0'), count: pending }))}</p>` : ''}
+    ${money && stats.lastPaidAt ? `<p class="small text-muted mb-0">${esc(t('lastPaid', { date: formatDateTime(stats.lastPaidAt) }))}</p>` : ''}
+    ${buttons ? `<div class="partner-actions">${buttons}</div>` : ''}`;
+}
+
+/**
+ * Contact details not already shown in the account list.
+ * @param {Partner} p
+ */
+function extraContact(p) {
+  const known = new Set(p.accounts.flatMap((a) => [a.displayName.trim().toLowerCase(), a.email.toLowerCase()]));
+  return [p.contactName, p.contactPhone, p.contactEmail].filter((value) => value && !known.has(value.trim().toLowerCase())).join(' · ');
 }
 
 /**
@@ -475,18 +485,27 @@ async function reviewDialog(partner, onChanged) {
  */
 function partnerCard(p, { manage, settle, showMerchant }) {
   const rule = p.rule
-    ? `<span class="fw-semibold">${esc(t('ruleShort', ruleTerms(p.rule)))}</span>
-       <span class="text-muted"> · ${esc(t('ruleVersion', { version: p.rule.version }))}</span>
-       ${isFixedRule(p.rule) ? '' : `<span class="d-block text-muted">${esc(t('rulePercentNote'))}</span>`}`
+    ? `<p class="partner-terms small">
+         <span class="fw-semibold">${esc(t('ruleShort', ruleTerms(p.rule)))}</span>
+         <span class="pill pill-sm" title="${esc(t('ruleVersion', { version: p.rule.version }))}">v${p.rule.version}</span>
+       </p>
+       ${isFixedRule(p.rule) ? '' : `<p class="small text-muted mb-0">${esc(t('rulePercentNote'))}</p>`}`
     : '';
   const accounts = p.accounts.length
     ? p.accounts
-        .map((a) => `<span class="d-block">${esc(a.displayName)} <span class="text-muted">· ${esc(a.email)} · ${esc(t(`status_${a.status}`))}</span></span>`)
+        .map(
+          (a) => `
+        <div class="partner-account">
+          <span class="partner-account-name">${esc(a.displayName)}</span>
+          <span class="pill pill-sm pill-${esc(a.status.toLowerCase())}">${esc(t(`status_${a.status}`))}</span>
+          <span class="partner-account-email text-muted" title="${esc(a.email)}">${esc(a.email)}</span>
+        </div>`,
+        )
         .join('')
     : `<span class="text-muted">${esc(t('noAccount'))}</span>`;
-  const contact = [p.contactName, p.contactPhone, p.contactEmail].filter(Boolean).join(' · ');
+  const contact = extraContact(p);
   const qrButton = p.qr
-    ? `<button type="button" class="btn btn-sm btn-outline-primary" data-action="qr" data-id="${esc(p.id)}">${icon('qr')}<span>${esc(t('partnerQr'))}</span></button>`
+    ? `<button type="button" class="btn btn-sm btn-outline-secondary" data-action="qr" data-id="${esc(p.id)}">${icon('qr')}<span>${esc(t('partnerQr'))}</span></button>`
     : '';
   const actions =
     manage && p.status !== 'ENDED'
@@ -513,11 +532,11 @@ function partnerCard(p, { manage, settle, showMerchant }) {
         </div>
         <span class="pill pill-${esc(p.status.toLowerCase())}">${esc(t(`status_${p.status}`))}</span>
       </header>
-      ${rule ? `<p class="small mb-1">${rule}</p>` : ''}
+      ${rule}
       ${p.stats ? partnerStatsLine(p, settle) : ''}
-      ${contact ? `<p class="small text-muted mb-1">${esc(contact)}</p>` : ''}
-      ${p.endReason ? `<p class="small text-muted mb-1">${esc(t('endPartner'))}: ${esc(p.endReason)}</p>` : ''}
-      <div class="small partner-accounts"><span class="text-muted d-block">${esc(t('partnerAccounts'))}</span>${accounts}</div>
+      ${contact ? `<p class="small text-muted mb-0">${esc(contact)}</p>` : ''}
+      ${p.endReason ? `<p class="small text-muted mb-0">${esc(t('endPartner'))}: ${esc(p.endReason)}</p>` : ''}
+      <div class="small partner-accounts"><span class="text-muted d-block mb-1">${esc(t('partnerAccounts'))}</span>${accounts}</div>
       ${actions}
     </article>`;
 }

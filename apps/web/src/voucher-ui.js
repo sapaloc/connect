@@ -35,6 +35,18 @@ export function referralLink(token) {
   return `${location.origin}/r/${token}`;
 }
 
+/**
+ * A link short enough for one line on a phone: no scheme, long token cut in the middle
+ * ("connect-uat.vercel.app/r/Vk3G…TFig"). Copy and Share still use the full link.
+ * @param {string} link
+ */
+export function shortLink(link) {
+  const bare = link.replace(/^https?:\/\//, '');
+  const cut = bare.lastIndexOf('/') + 1;
+  const token = bare.slice(cut);
+  return token.length > 12 ? `${bare.slice(0, cut)}${token.slice(0, 4)}…${token.slice(-4)}` : bare;
+}
+
 /** @param {Pick<Voucher, 'discountType' | 'discountValue'>} voucher */
 export function discountText(voucher) {
   return voucher.discountType === 'PERCENT'
