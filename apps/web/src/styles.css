@@ -1104,6 +1104,120 @@ a.brand:hover {
   text-wrap: balance;
 }
 
+.vdialog-wide {
+  width: min(640px, calc(100vw - 24px));
+}
+
+.history-filters {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.history-totals {
+  margin: 12px 0;
+}
+
+.history-list,
+.payout-list {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.history-item,
+.history-payout {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--sw-line);
+  font-variant-numeric: tabular-nums;
+}
+
+.history-list > li:last-child,
+.payout-list > li:last-child .history-payout {
+  border-bottom: 0;
+}
+
+.history-payout {
+  width: 100%;
+  border: 0;
+  border-bottom: 1px solid var(--sw-line);
+  background: none;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.history-payout:hover .history-main > :first-child,
+.history-payout:focus-visible .history-main > :first-child {
+  color: var(--sw-acc) !important;
+}
+
+.history-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.history-side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  flex-shrink: 0;
+  text-align: right;
+}
+
+.dash-section + .dash-section {
+  margin-top: 16px;
+}
+
+.dash-section .card-title {
+  margin-bottom: 8px;
+}
+
+.dash-section .kpi-value {
+  font-size: 18px;
+  white-space: nowrap;
+}
+
+.grid-kpi-money3 {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+@media (min-width: 768px) {
+  .dash-section .kpi-value {
+    font-size: 20px;
+  }
+
+  .grid-kpi-money3 {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.dash-sub {
+  display: block;
+  font-size: 12px;
+  color: var(--sw-ink3);
+}
+
+.work-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.partner-card.is-target {
+  border-color: var(--sw-acc);
+  box-shadow: 0 0 0 3px var(--sw-acc-soft);
+}
+
 .scan {
   display: grid;
   gap: 12px;
@@ -1439,22 +1553,6 @@ a.brand:hover {
 .my-page {
   display: grid;
   gap: 16px;
-}
-
-.my-recent {
-  display: grid;
-  gap: 10px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.my-recent li {
-  display: grid;
-  grid-template-columns: 1fr auto auto;
-  align-items: center;
-  gap: 10px;
-  font-variant-numeric: tabular-nums;
 }
 
 .brand-preview {

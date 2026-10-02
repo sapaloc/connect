@@ -6,6 +6,7 @@ import { brandPanel, mountBrand } from './brand.js';
 import { counterPanel, mountCounter } from './counter.js';
 import { merchantsPanel, mountMerchants } from './merchants.js';
 import { mountMy, myPanel } from './my.js';
+import { mountOverview, overviewNumbers, overviewWork } from './overview.js';
 import { mountPartners, partnersPanel } from './partners.js';
 import { mountTeam, teamPanel } from './team.js';
 import { mountVouchers, vouchersPanel } from './vouchers.js';
@@ -156,6 +157,7 @@ function render(app, path, content) {
 export function consoleView(app) {
   const profile = /** @type {import('../api.js').Profile} */ (app.state.profile);
   const shortcuts = visibleNav(profile).filter((item) => item.path !== '/console');
+  const numbers = profile.permissions.includes('voucher.list');
   render(
     app,
     '/console',
@@ -164,10 +166,11 @@ export function consoleView(app) {
       <p class="eyebrow">${esc(t('surface_console'))}</p>
       <h2 class="h4 mb-0">${esc(t('hello', { name: profile.user.displayName }))}</h2>
     </section>
+    ${numbers ? `<section class="card-sw">${overviewNumbers()}</section>` : ''}
     <div class="grid-2">
       <section class="card-sw">
         <h3 class="card-title">${esc(t('workTitle'))}</h3>
-        ${emptyState(t('workNothing'), t('workEmpty'))}
+        ${numbers ? overviewWork() : emptyState(t('workNothing'), t('workEmpty'))}
       </section>
       ${
         shortcuts.length
@@ -181,6 +184,7 @@ export function consoleView(app) {
       }
     </div>`,
   );
+  if (numbers) mountOverview();
 }
 
 /** @param {App} app */
