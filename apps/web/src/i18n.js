@@ -929,10 +929,11 @@ export function setLang(lang) {
 /**
  * @param {string} key
  * @param {Record<string, string | number>} [params]
+ * @param {'vi' | 'en'} [lang] a fixed language, e.g. for the bilingual print poster
  */
-export function t(key, params = {}) {
+export function t(key, params = {}, lang = getLang()) {
   const one = params.count === 1 ? `${key}_one` : '';
-  const template = (one && (messages[getLang()][one] ?? messages.en[one])) || messages[getLang()][key] || messages.en[key] || key;
+  const template = (one && (messages[lang][one] ?? messages.en[one])) || messages[lang][key] || messages.en[key] || key;
   return template.replace(/\{(\w+)\}/g, (_match, name) => String(params[name] ?? ''));
 }
 
@@ -957,9 +958,10 @@ export function formatDate(value) {
 /**
  * Whole VND for display ("1.250.000 ₫"); amounts stay 4-decimal strings everywhere else.
  * @param {string} amount
+ * @param {'vi' | 'en'} [lang]
  */
-export function formatVnd(amount) {
-  return new Intl.NumberFormat(getLang() === 'vi' ? 'vi-VN' : 'en-US', { style: 'currency', currency: 'VND', maximumFractionDigits: 0 }).format(
+export function formatVnd(amount, lang = getLang()) {
+  return new Intl.NumberFormat(lang === 'vi' ? 'vi-VN' : 'en-US', { style: 'currency', currency: 'VND', maximumFractionDigits: 0 }).format(
     Number(toVnd(amount)),
   );
 }
