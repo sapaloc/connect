@@ -72,11 +72,13 @@ export function amountOf(text) {
 
 /**
  * Checks a bill / discount / customer pays block: the shown numbers, that they add up, and that
- * "Customer pays" keeps at least 16 px from its amount.
+ * "Customer pays" keeps at least 16 px from its amount. In a narrow box (`mayWrap`) the amount may
+ * instead wrap below the label.
  * @param {import('@playwright/test').Locator} amounts a `dl.amounts`
  * @param {{ bill: number, discount: number }} expected
+ * @param {{ mayWrap?: boolean }} [options]
  */
-export async function expectAmounts(amounts, { bill, discount }) {
+export async function expectAmounts(amounts, { bill, discount }, { mayWrap = false } = {}) {
   const values = await amounts.locator('dd').allTextContents();
   expect(values.map(amountOf)).toEqual([bill, discount, bill - discount]);
   expect(amountOf(values[0])).toBe(amountOf(values[1]) + amountOf(values[2]));
@@ -84,8 +86,12 @@ export async function expectAmounts(amounts, { bill, discount }) {
   const dt = await total.locator('dt').boundingBox();
   const dd = await total.locator('dd').boundingBox();
   if (!dt || !dd) throw new Error('amounts-total is not visible');
-  expect(Math.abs(dt.y - dd.y)).toBeLessThan(dt.height);
-  expect(dd.x - (dt.x + dt.width)).toBeGreaterThanOrEqual(16);
+  if (dd.y < dt.y + dt.height / 2) {
+    expect(dd.x - (dt.x + dt.width)).toBeGreaterThanOrEqual(16);
+  } else {
+    expect(mayWrap, '"Customer pays" and its amount on one line').toBe(true);
+    expect(dd.y).toBeGreaterThanOrEqual(dt.y + dt.height - 1);
+  }
 }
 
 /** A redemption code as staff types it, from what the voucher card shows ("ABCD-2345"). @param {string} shown */

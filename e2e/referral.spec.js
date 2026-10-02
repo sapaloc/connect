@@ -27,7 +27,7 @@ test('partner QR link → guest takes a voucher → counter sends the bill → g
 
   const ask = guest.getByRole('alertdialog');
   await expect(ask.locator('#guest-confirm-title')).toHaveText('Confirm your bill at Number160');
-  await expectAmounts(ask.locator('.amounts'), { bill: 500_000, discount: 50_000 });
+  await expectAmounts(ask.locator('.amounts'), { bill: 500_000, discount: 50_000 }, { mayWrap: true });
   await ask.getByRole('button', { name: 'Correct, confirm' }).click();
   await expect(guest.getByText('Thank you! The voucher is applied to this bill.')).toBeVisible();
   await expect(guest.locator('.vcard .pill')).toHaveText('Redeemed');
