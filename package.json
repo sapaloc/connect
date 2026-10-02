@@ -25,6 +25,7 @@
     "test": "node --env-file-if-exists=.env.test --test --test-concurrency=1 'packages/domain/test/**/*.test.js' 'apps/api/test/**/*.test.js'",
     "test:permission": "node --env-file-if-exists=.env.test --test --test-concurrency=1 --test-force-exit --test-name-pattern=@permission 'packages/domain/test/**/*.test.js' 'apps/api/test/**/*.test.js'",
     "test:money": "node --env-file-if-exists=.env.test --test --test-concurrency=1 --test-force-exit --test-name-pattern=@money 'packages/domain/test/**/*.test.js' 'apps/api/test/**/*.test.js'",
+    "test:e2e": "playwright test",
     "check:syntax": "git ls-files '*.js' '*.mjs' | xargs -n1 node --check"
   },
   "dependencies": {
@@ -36,6 +37,7 @@
     "sharp": "^0.35.5"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "vite": "^6.0.0"
   }
 }

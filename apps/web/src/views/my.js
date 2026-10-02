@@ -4,6 +4,7 @@ import { errorText, formatVnd, t } from '../i18n.js';
 import { downloadBlob, partnerQrImage, referralLink, referralQrDataUrl, ruleDiscount, ruleTerms, sharePartnerQr, shortLink } from '../voucher-ui.js';
 import { messageSlot, showMessage } from './common.js';
 import { historyBlock, mountHistory, openPayout, payoutItem } from './history.js';
+import { mountMyReport, myReportCard } from './report.js';
 
 /** @typedef {import('../main.js').App} App */
 
@@ -139,9 +140,11 @@ export async function mountMy(app) {
         }
         <p class="small text-muted mt-3 mb-0">${esc(t('myPayNote'))}</p>
       </section>
+      ${myReportCard()}
       ${partner.status === 'ENDED' ? '' : contactCard(partner)}`;
 
     if (hasActivity) mountHistory(page, 'my-h', { url: '/api/v1/my/partner/history', withCode: false });
+    mountMyReport(page);
     page.querySelector('#my-payouts')?.addEventListener('click', (event) => {
       const id = /** @type {HTMLElement} */ (event.target).closest('[data-payout]')?.getAttribute('data-payout');
       if (id) openPayout(`/api/v1/my/partner/payouts/${encodeURIComponent(id)}`, false).catch((error) => showMessage(errorText(error), 'error', 'my-message'));

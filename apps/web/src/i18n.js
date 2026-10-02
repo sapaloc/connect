@@ -354,8 +354,8 @@ const messages = {
     myPaused: 'Quán đang tạm ngưng hợp tác: khách quét mã sẽ chưa nhận được voucher.',
     myNoQr: 'Hợp tác đã kết thúc, mã QR không còn hoạt động.',
     kpiOpens: 'Lượt mở link',
-    kpiActivations: 'Voucher đã nhận',
-    kpiRedemptions: 'Lượt dùng tại quán',
+    kpiActivations: 'Lượt nhận',
+    kpiRedemptions: 'Lượt dùng',
     myNoRecent: 'Chưa có lượt dùng nào. Gửi mã QR cho khách để bắt đầu.',
     myPayNote: 'Quán trả hoa hồng cho bạn bên ngoài MyConnect rồi đánh dấu Đã trả tại đây. MyConnect không thu hay chi tiền.',
     myMerchants: 'Merchant của bạn',
@@ -410,6 +410,31 @@ const messages = {
     workUnpaid: '{name}: {amount} chưa trả',
     workAllDone: 'Không có hoá đơn chờ duyệt, không còn hoa hồng chưa trả.',
     workManagerHint: 'Hoá đơn chờ duyệt và hoa hồng chưa trả do Quản trị merchant xử lý.',
+    reportOpen: 'Báo cáo',
+    reportTitle: 'Báo cáo hoa hồng',
+    reportHint: 'Hoá đơn dùng voucher của partner, theo ngày hoá đơn (giờ Việt Nam). Chỉ xem.',
+    reportPeriod: 'Kỳ báo cáo',
+    period_custom: 'Tuỳ chọn',
+    periodFrom: 'Từ ngày',
+    periodTo: 'Đến ngày',
+    reportRange: '{from} – {to}',
+    reportPartner: 'Partner',
+    reportDiscount: 'Giảm giá',
+    reportStatus_OPEN: 'Chưa trả',
+    reportStatus_PAID: 'Đã trả',
+    reportStatus_PENDING: 'Chờ duyệt',
+    reportStatus_VOID: 'Đã huỷ',
+    reportCommission_OPEN: 'Hoa hồng chưa trả',
+    reportCommission_PAID: 'Hoa hồng đã trả',
+    reportCommission_PENDING: 'Hoa hồng chờ duyệt',
+    reportCommission_VOID: 'Hoa hồng đã huỷ',
+    reportTotal: 'Tổng cộng',
+    reportEmpty: 'Không có hoá đơn nào của partner trong kỳ này.',
+    reportExport: 'Xuất CSV',
+    reportDownloaded: 'Đã tải file CSV.',
+    reportDatesInvalid: 'Chọn ngày bắt đầu không sau ngày kết thúc, cách nhau tối đa 366 ngày.',
+    myReportTitle: 'Tải báo cáo',
+    myReportHint: 'Hoá đơn của bạn trong kỳ, file CSV mở bằng Excel: ngày, khách trả, hoa hồng, trạng thái và lần trả. Theo ngày hoá đơn, giờ Việt Nam.',
     billPhotoAdd: 'Chụp ảnh hoá đơn',
     billPhotoOptional: 'Không bắt buộc. Giúp quán đối chiếu thanh toán.',
     billPhotoUploading: 'Đang tải ảnh lên…',
@@ -868,6 +893,31 @@ const messages = {
     workUnpaid: '{name}: {amount} unpaid',
     workAllDone: 'No bill to review and no unpaid commission.',
     workManagerHint: 'Bills to review and unpaid commission are handled by the Merchant admin.',
+    reportOpen: 'Report',
+    reportTitle: 'Commission report',
+    reportHint: 'Bills of partner vouchers, by bill date in Vietnam time. Read only.',
+    reportPeriod: 'Period',
+    period_custom: 'Custom',
+    periodFrom: 'From',
+    periodTo: 'To',
+    reportRange: '{from} – {to}',
+    reportPartner: 'Partner',
+    reportDiscount: 'Discount',
+    reportStatus_OPEN: 'Unpaid',
+    reportStatus_PAID: 'Paid',
+    reportStatus_PENDING: 'Waiting',
+    reportStatus_VOID: 'Voided',
+    reportCommission_OPEN: 'Commission unpaid',
+    reportCommission_PAID: 'Commission paid',
+    reportCommission_PENDING: 'Commission waiting',
+    reportCommission_VOID: 'Commission voided',
+    reportTotal: 'Total',
+    reportEmpty: 'No partner bill in this period.',
+    reportExport: 'Export CSV',
+    reportDownloaded: 'CSV downloaded.',
+    reportDatesInvalid: 'Choose a start date on or before the end date, at most 366 days apart.',
+    myReportTitle: 'Download report',
+    myReportHint: 'Your bills of the period as a CSV file for Excel: date, guest paid, commission, status and payment. By bill date, Vietnam time.',
     billPhotoAdd: 'Take a photo of the bill',
     billPhotoOptional: 'Optional. Helps the merchant check the payment.',
     billPhotoUploading: 'Uploading photo…',
@@ -929,10 +979,11 @@ export function setLang(lang) {
 /**
  * @param {string} key
  * @param {Record<string, string | number>} [params]
+ * @param {'vi' | 'en'} [lang] a fixed language, e.g. for the bilingual print poster
  */
-export function t(key, params = {}) {
+export function t(key, params = {}, lang = getLang()) {
   const one = params.count === 1 ? `${key}_one` : '';
-  const template = (one && (messages[getLang()][one] ?? messages.en[one])) || messages[getLang()][key] || messages.en[key] || key;
+  const template = (one && (messages[lang][one] ?? messages.en[one])) || messages[lang][key] || messages.en[key] || key;
   return template.replace(/\{(\w+)\}/g, (_match, name) => String(params[name] ?? ''));
 }
 
@@ -957,9 +1008,10 @@ export function formatDate(value) {
 /**
  * Whole VND for display ("1.250.000 ₫"); amounts stay 4-decimal strings everywhere else.
  * @param {string} amount
+ * @param {'vi' | 'en'} [lang]
  */
-export function formatVnd(amount) {
-  return new Intl.NumberFormat(getLang() === 'vi' ? 'vi-VN' : 'en-US', { style: 'currency', currency: 'VND', maximumFractionDigits: 0 }).format(
+export function formatVnd(amount, lang = getLang()) {
+  return new Intl.NumberFormat(lang === 'vi' ? 'vi-VN' : 'en-US', { style: 'currency', currency: 'VND', maximumFractionDigits: 0 }).format(
     Number(toVnd(amount)),
   );
 }

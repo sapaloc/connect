@@ -1,4 +1,4 @@
-import { fixedRuleFromAmounts, isFixedRule, PARTNER_TYPES, percentRuleFromPercents, PRICING_MODELS, ratePercent, toVnd } from '#domain';
+import { fixedRuleFromAmounts, formatVoucherCode, isFixedRule, PARTNER_TYPES, percentRuleFromPercents, PRICING_MODELS, ratePercent, toVnd } from '#domain';
 import { api } from '../api.js';
 import { $, busy, esc, formValues } from '../dom.js';
 import { errorText, formatDateTime, formatVnd, getLang, groupDigits, t } from '../i18n.js';
@@ -6,6 +6,7 @@ import { downloadBlob, partnerQrImage, referralLink, referralQrDataUrl, ruleDisc
 import { icon } from '../nav.js';
 import { messageSlot, showLink, showMessage } from './common.js';
 import { historyBlock, mountHistory, openDialog, openPayout, payoutItem } from './history.js';
+import { mountReport, reportCard } from './report.js';
 import { billPhotoList } from './voucher-card.js';
 
 /** @typedef {import('../main.js').App} App */
@@ -146,6 +147,7 @@ function rulePayload(form) {
 /** @param {App} app */
 export function partnersPanel(app) {
   const manage = app.state.profile?.permissions.includes('partner.manage') ?? false;
+  const report = app.state.profile?.permissions.includes('commission.report') ?? false;
   const createSection = `
     <section class="card-sw" id="partner-create-card" hidden>
       <h2 class="card-title">${esc(t('partnerCreateTitle'))}</h2>
@@ -217,10 +219,14 @@ export function partnersPanel(app) {
       ${messageSlot('partner-create-message')}
     </section>`;
   return `
+    ${report ? reportCard() : ''}
     <section class="card-sw" id="partner-list-card">
-      <div class="d-flex justify-content-between align-items-center gap-2 mb-3">
+      <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
         <h2 class="card-title mb-0">${esc(t('partnersTitle'))}</h2>
-        ${manage ? `<button type="button" class="btn btn-primary btn-sm" id="partner-create-open" aria-controls="partner-create-card" aria-expanded="false">+ ${esc(t('partnerCreate'))}</button>` : ''}
+        <div class="d-flex gap-2 ms-auto">
+          ${report ? `<button type="button" class="btn btn-outline-secondary btn-sm text-nowrap" id="partner-report-open" aria-controls="partner-report-card" aria-expanded="false">${esc(t('reportOpen'))}</button>` : ''}
+          ${manage ? `<button type="button" class="btn btn-primary btn-sm text-nowrap" id="partner-create-open" aria-controls="partner-create-card" aria-expanded="false">+ ${esc(t('partnerCreate'))}</button>` : ''}
+        </div>
       </div>
       ${messageSlot('partner-message')}
       <div id="partner-link" class="link-box mb-3" hidden></div>
@@ -436,7 +442,7 @@ async function reviewDialog(partner, onChanged) {
                 .map(
                   (/** @type {any} */ r) => `
           <article class="review-item">
-            <p class="small mb-1"><strong translate="no">${esc(r.voucher?.code ?? '')}</strong> · ${esc(formatDateTime(r.createdAt))}</p>
+            <p class="small mb-1"><strong class="font-monospace" translate="no">${esc(r.voucher?.code ? formatVoucherCode(r.voucher.code) : '')}</strong> · ${esc(formatDateTime(r.createdAt))}</p>
             <p class="small mb-1">${esc(t('reviewBill', { bill: formatVnd(r.voucher?.redemption?.grossAmount ?? '0'), pays: formatVnd(r.voucher?.redemption?.payableAmount ?? '0') }))}</p>
             <p class="small mb-1">${esc(t('reviewReason', { reason: t(`fallback_${r.reason}`) }))} · ${esc(t('reviewCommission', { amount: formatVnd(r.amount) }))}</p>
             ${billPhotoList(r.voucher?.billPhotos ?? [])}
@@ -580,6 +586,7 @@ export function mountPartners(app) {
   const manage = profile.permissions.includes('partner.manage');
   const settle = profile.permissions.includes('commission.settle');
   const history = profile.permissions.includes('commission.list');
+  const report = profile.permissions.includes('commission.report');
   const showMerchant = !profile.activeRole?.tenantId;
   /** @type {Partner[]} */
   let partners = [];
@@ -623,6 +630,13 @@ export function mountPartners(app) {
       showMessage(errorText(error), 'error', 'partner-message');
     }
   };
+
+  if (report) {
+    const openButton = $('#partner-report-open');
+    const setReportOpen = mountReport(app.root, { onToggle: (open) => openButton.setAttribute('aria-expanded', String(open)) });
+    openButton.addEventListener('click', () => setReportOpen(true));
+    if (new URLSearchParams(location.search).get('view') === 'report') setReportOpen(true);
+  }
 
   if (manage) {
     $('#partner-create-open').addEventListener('click', () => setCreateOpen(true));

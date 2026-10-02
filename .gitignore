@@ -2,6 +2,9 @@ node_modules/
 dist/
 .vercel/
 backups/
+e2e/.auth/
+playwright-report/
+test-results/
 .env
 .env.*
 !.env.example

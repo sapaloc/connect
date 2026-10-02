@@ -7,6 +7,7 @@ import { merchantRoutes } from '../merchants/merchant-routes.js';
 import { historyRoutes } from '../partners/history.js';
 import { myRoutes } from '../partners/my-routes.js';
 import { partnerRoutes } from '../partners/partner-routes.js';
+import { reportRoutes } from '../partners/report.js';
 import { reviewRoutes } from '../partners/review-routes.js';
 import { referralRoutes } from '../referrals/referral-routes.js';
 import { confirmationRoutes } from '../vouchers/confirmation-routes.js';
@@ -28,6 +29,7 @@ const definitions = [
   ...referralRoutes,
   ...myRoutes,
   ...historyRoutes,
+  ...reportRoutes,
   ...dashboardRoutes,
   ...fileRoutes,
   ...voucherRoutes,
