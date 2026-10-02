@@ -51,6 +51,17 @@ async function ownProfile(ctx, tx) {
   return profile;
 }
 
+/**
+ * The ACTIVE profile of the signed-in partner, with or without merchants: needed to find merchants.
+ * @param {import('../http/router.js').Context} ctx
+ * @param {import('mongodb').ClientSession} [tx]
+ */
+export async function activeProfile(ctx, tx) {
+  const profile = await ownProfile(ctx, tx);
+  if (profile.status !== 'ACTIVE') throw new HttpError(404, 'PARTNER_PROFILE_NOT_FOUND', 'Partner profile not found');
+  return profile;
+}
+
 /** @type {import('../http/router.js').Handler} */
 async function getProfile(_req, res, ctx) {
   sendJson(res, 200, { profile: profileView(await ownProfile(ctx)) });

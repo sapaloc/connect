@@ -9,7 +9,7 @@ import { closeClient, COLLECTIONS, getDb } from './mongo.js';
  * Bump when a validator or index changes. Changes must keep old documents valid
  * (add optional fields; backfill in a script before making a field required).
  */
-export const SCHEMA_VERSION = 12;
+export const SCHEMA_VERSION = 13;
 
 const DAY_SECONDS = 24 * 60 * 60;
 const uuid = { bsonType: 'string', pattern: '^[0-9a-f-]{36}$' };
@@ -92,11 +92,12 @@ const DEFINITIONS = {
         createdAt: date,
       },
     },
-    // slug, contactEmail, contactPhone, address, vatRate, brandColor, logoAssetId are optional and not in the validator: changing
-    // an existing validator needs collMod, which the UAT database user may not run.
+    // slug, contactEmail, contactPhone, address, vatRate, brandColor, logoAssetId, acceptsNewPartners are optional and not in the
+    // validator: changing an existing validator needs collMod, which the UAT database user may not run.
     indexes: [
       { key: { name: 1 }, name: 'name_uq', unique: true },
       { key: { slug: 1 }, name: 'slug_uq', unique: true, partialFilterExpression: { slug: { $type: 'string' } } },
+      { key: { status: 1, name: 1 }, name: 'accepting_partners', partialFilterExpression: { acceptsNewPartners: true } },
     ],
   },
 
@@ -635,6 +636,34 @@ const DEFINITIONS = {
     indexes: [
       { key: { userId: 1 }, name: 'user_uq', unique: true },
       { key: { status: 1, partnerType: 1 }, name: 'status_type' },
+    ],
+  },
+
+  // A partner (with a partner profile) asking a merchant that accepts new partners to work together.
+  [COLLECTIONS.partnerJoinRequests]: {
+    schema: {
+      bsonType: 'object',
+      required: ['_id', 'tenantId', 'userId', 'profileId', 'status', 'createdAt', 'updatedAt'],
+      properties: {
+        _id: uuid,
+        tenantId: uuid,
+        userId: uuid,
+        profileId: uuid,
+        message: { bsonType: ['string', 'null'] },
+        status: { enum: ['PENDING', 'APPROVED', 'REJECTED', 'CANCELLED'] },
+        createdAt: date,
+        updatedAt: date,
+        reviewedBy: nullableUuid,
+        reviewedAt: nullableDate,
+        rejectReason: { bsonType: ['string', 'null'] },
+        cancelledAt: nullableDate,
+        partnerId: nullableUuid,
+      },
+    },
+    indexes: [
+      { key: { userId: 1, tenantId: 1 }, name: 'pending_user_tenant_uq', unique: true, partialFilterExpression: { status: 'PENDING' } },
+      { key: { tenantId: 1, status: 1, createdAt: 1 }, name: 'tenant_status_created' },
+      { key: { userId: 1, createdAt: -1 }, name: 'user_created' },
     ],
   },
 

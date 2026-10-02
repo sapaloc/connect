@@ -252,7 +252,11 @@ describe('partner application: approve and first sign-in', () => {
   let app;
   /** @type {any} */
   let approved;
-  const partner = agent();
+  /** @type {Agent} */
+  let partner;
+  before(() => {
+    partner = agent();
+  });
 
   it('creates an ACTIVE account without roles, a partner profile and a temporary password, once', async () => {
     app = await pending();

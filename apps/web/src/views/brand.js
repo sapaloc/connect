@@ -45,6 +45,16 @@ export function brandPanel() {
         </div>
         ${messageSlot('brand-color-message')}
       </form>
+    </section>
+
+    <section class="card-sw" aria-labelledby="accept-title">
+      <h2 class="card-title" id="accept-title">${esc(t('acceptPartnersTitle'))}</h2>
+      <p class="small text-muted" id="accept-hint"></p>
+      <div class="form-check form-switch accept-switch">
+        <input class="form-check-input" type="checkbox" role="switch" id="accept-partners" aria-describedby="accept-hint" disabled />
+        <label class="form-check-label" for="accept-partners">${esc(t('acceptPartnersLabel'))}</label>
+      </div>
+      ${messageSlot('accept-message')}
     </section>`;
 }
 
@@ -80,11 +90,31 @@ export async function mountBrand(app) {
     preview();
   };
 
+  const accept = /** @type {HTMLInputElement} */ ($('#accept-partners'));
+  $('#accept-hint').textContent = t('acceptPartnersHint', { name: merchantName });
   try {
-    apply((await api('GET', '/api/v1/merchant/settings')).brand);
+    const settings = await api('GET', '/api/v1/merchant/settings');
+    apply(settings.brand);
+    accept.checked = settings.acceptsNewPartners;
+    accept.disabled = false;
   } catch (error) {
     showMessage(errorText(error), 'error', 'brand-logo-message');
   }
+
+  accept.addEventListener('change', async () => {
+    const wanted = accept.checked;
+    accept.disabled = true;
+    try {
+      const result = await api('POST', '/api/v1/merchant/accept-partners', { acceptsNewPartners: wanted });
+      accept.checked = result.acceptsNewPartners;
+      showMessage(t(result.acceptsNewPartners ? 'acceptPartnersOn' : 'acceptPartnersOff', { name: merchantName }), 'success', 'accept-message');
+    } catch (error) {
+      accept.checked = !wanted;
+      showMessage(errorText(error), 'error', 'accept-message');
+    } finally {
+      accept.disabled = false;
+    }
+  });
 
   picker.addEventListener('input', () => {
     hex.value = picker.value.toUpperCase();

@@ -1,6 +1,7 @@
 import { api } from '../api.js';
 import { $, busy, esc, formValues } from '../dom.js';
 import { errorText, t } from '../i18n.js';
+import { FIND_MERCHANTS_PATH } from '../nav.js';
 import { authLayout, messageSlot, showMessage } from './common.js';
 
 /** @typedef {import('../main.js').App} App */
@@ -66,7 +67,7 @@ function contactForm(p) {
 
 /**
  * First page of an approved partner who has joined no merchant yet: profile, contact edit and the
- * coming "Find merchants" step.
+ * way to Find merchants.
  * @param {App} app
  */
 export function partnerWelcomeView(app) {
@@ -81,9 +82,9 @@ export function partnerWelcomeView(app) {
         ${messageSlot('profile-message')}
       </section>
       <section class="partner-card" aria-labelledby="find-title">
-        <h2 class="h6 mb-2" id="find-title">${esc(t('findMerchantsTitle'))} <span class="soon-badge">${esc(t('comingSoon'))}</span></h2>
+        <h2 class="h6 mb-2" id="find-title">${esc(t('findMerchantsTitle'))}</h2>
         <p class="small text-muted mb-3">${esc(t('findMerchantsBody'))}</p>
-        <button type="button" class="btn btn-outline-secondary w-100" disabled aria-describedby="find-title">${esc(t('findMerchantsButton'))}</button>
+        <a href="${FIND_MERCHANTS_PATH}" data-nav class="btn btn-primary w-100">${esc(t('findMerchantsButton'))}</a>
       </section>
       <p class="text-center small mb-0"><a href="#" data-signout>${esc(t('signOut'))}</a></p>`,
   });

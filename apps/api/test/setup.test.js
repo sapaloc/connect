@@ -38,10 +38,21 @@ describe('db:setup on an existing database', () => {
     assert.equal(byName.pending_slug_uq?.unique, true);
   });
 
-  it('records schema v12 with partner_applications and partner_profiles (new collections only)', async () => {
+  it('records schema v13 with partner_join_requests and the accepting-partners index (no validator change)', async () => {
     const db = await getDb();
-    assert.equal(SCHEMA_VERSION, 12);
-    assert.equal(await db.collection('schema_versions').countDocuments({ _id: 12 }), 1);
+    assert.equal(SCHEMA_VERSION, 13);
+    assert.equal(await db.collection('schema_versions').countDocuments({ _id: 13 }), 1);
+    const requests = Object.fromEntries((await db.collection('partner_join_requests').indexes()).map((index) => [index.name, index]));
+    assert.equal(requests.pending_user_tenant_uq?.unique, true);
+    assert.deepEqual(requests.pending_user_tenant_uq?.partialFilterExpression, { status: 'PENDING' });
+    const tenants = Object.fromEntries((await db.collection('tenants').indexes()).map((index) => [index.name, index]));
+    assert.deepEqual(tenants.accepting_partners?.partialFilterExpression, { acceptsNewPartners: true });
+    const [tenantCollection] = await db.listCollections({ name: 'tenants' }).toArray();
+    assert.ok(!('acceptsNewPartners' in (tenantCollection.options?.validator?.$jsonSchema?.properties ?? {})));
+  });
+
+  it('keeps partner_applications and partner_profiles from v12', async () => {
+    const db = await getDb();
     const applications = Object.fromEntries((await db.collection('partner_applications').indexes()).map((index) => [index.name, index]));
     assert.equal(applications.pending_email_uq?.unique, true);
     assert.deepEqual(applications.pending_email_uq?.partialFilterExpression, { status: 'PENDING' });

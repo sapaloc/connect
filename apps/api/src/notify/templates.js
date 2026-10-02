@@ -3,6 +3,7 @@
  * @typedef {{
  *   name?: string, displayName?: string, email?: string, applicantEmail?: string, reason?: string,
  *   temporaryPassword?: string, expiresAt?: string, origin?: string, partnerType?: string, relationshipKind?: string,
+ *   merchantName?: string, message?: string,
  * }} EmailData
  * @typedef {{
  *   subject: string, greeting?: string, paragraphs: string[], details?: Array<[string, string]>,
@@ -140,6 +141,68 @@ const TEMPLATES = {
       paragraphs: [`Cảm ơn bạn đã quan tâm đến MyConnect. Đơn đăng ký partner của ${d.name} chưa được duyệt.`],
       details: [['Lý do', d.reason ?? '']],
       after: [`Bạn có thể gửi đơn mới bất cứ lúc nào: ${d.origin}/register?type=partner`],
+    }),
+  },
+  JOIN_REQUEST_NEW_FOR_MERCHANT: {
+    en: (d) => ({
+      subject: `New partner request: ${d.name}`,
+      paragraphs: [`${d.name} would like to work with ${d.merchantName} as a partner.`],
+      details: /** @type {Array<[string, string]>} */ ([
+        ['Partner', d.name ?? ''],
+        ['Type', partnerKind(d, 'en')],
+        ['Contact', `${d.displayName} (${d.applicantEmail})`],
+        ...(d.message ? [['Message', d.message]] : []),
+      ]),
+      link: { label: 'Review in Console → Partners', url: `${d.origin}/console/partners` },
+      after: ['Approve to set the guest discount and the commission; the partner then gets its QR in MyConnect.'],
+    }),
+    vi: (d) => ({
+      subject: `Yêu cầu hợp tác mới: ${d.name}`,
+      paragraphs: [`${d.name} muốn làm partner của ${d.merchantName}.`],
+      details: /** @type {Array<[string, string]>} */ ([
+        ['Partner', d.name ?? ''],
+        ['Loại', partnerKind(d, 'vi')],
+        ['Liên hệ', `${d.displayName} (${d.applicantEmail})`],
+        ...(d.message ? [['Lời nhắn', d.message]] : []),
+      ]),
+      link: { label: 'Duyệt tại Console → Partner', url: `${d.origin}/console/partners` },
+      after: ['Khi duyệt, bạn đặt mức giảm cho khách và hoa hồng; sau đó partner có mã QR trong MyConnect.'],
+    }),
+  },
+  JOIN_REQUEST_APPROVED: {
+    en: (d) => ({
+      subject: `${d.merchantName} accepted your partner request`,
+      greeting: `Hello ${d.displayName},`,
+      paragraphs: [
+        `${d.merchantName} accepted ${d.name} as a partner. Your QR code and terms for ${d.merchantName} are now in MyConnect.`,
+        'Sign in with your usual email and password.',
+      ],
+      link: { label: 'Open MyConnect', url: `${d.origin}/login` },
+    }),
+    vi: (d) => ({
+      subject: `${d.merchantName} đã chấp nhận yêu cầu hợp tác của bạn`,
+      greeting: `Xin chào ${d.displayName},`,
+      paragraphs: [
+        `${d.merchantName} đã nhận ${d.name} làm partner. Mã QR và điều khoản của bạn tại ${d.merchantName} đã có trong MyConnect.`,
+        'Đăng nhập bằng email và mật khẩu bạn vẫn dùng.',
+      ],
+      link: { label: 'Mở MyConnect', url: `${d.origin}/login` },
+    }),
+  },
+  JOIN_REQUEST_REJECTED: {
+    en: (d) => ({
+      subject: `${d.merchantName} did not accept your partner request`,
+      greeting: `Hello ${d.displayName},`,
+      paragraphs: [`${d.merchantName} did not accept the partner request from ${d.name}.`],
+      ...(d.reason ? { details: /** @type {Array<[string, string]>} */ ([['Reason', d.reason]]) } : {}),
+      after: [`You can ask other merchants in MyConnect: ${d.origin}/my/merchants`],
+    }),
+    vi: (d) => ({
+      subject: `${d.merchantName} chưa chấp nhận yêu cầu hợp tác của bạn`,
+      greeting: `Xin chào ${d.displayName},`,
+      paragraphs: [`${d.merchantName} chưa chấp nhận yêu cầu hợp tác của ${d.name}.`],
+      ...(d.reason ? { details: /** @type {Array<[string, string]>} */ ([['Lý do', d.reason]]) } : {}),
+      after: [`Bạn có thể gửi yêu cầu tới merchant khác trong MyConnect: ${d.origin}/my/merchants`],
     }),
   },
   APPLICATION_RECEIVED: {

@@ -22,6 +22,7 @@ export const COLLECTIONS = Object.freeze({
   merchantApplications: 'merchant_applications',
   partnerApplications: 'partner_applications',
   partnerProfiles: 'partner_profiles',
+  partnerJoinRequests: 'partner_join_requests',
   schemaVersions: 'schema_versions',
 });
 

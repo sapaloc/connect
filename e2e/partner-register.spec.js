@@ -189,8 +189,7 @@ test.describe('partner register on a phone', () => {
     await expect(page).toHaveURL(/\/partner\/welcome$/);
     await expect(page.getByRole('heading', { name: `Welcome, ${partner.contact}` })).toBeVisible();
     await expect(page.locator('#partner-profile')).toContainText(partner.name);
-    await expect(page.getByRole('button', { name: 'Find merchants' })).toBeDisabled();
-    await expect(page.getByText('Coming soon')).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Find merchants' })).toHaveAttribute('href', '/my/merchants');
 
     await page.getByRole('button', { name: 'Edit contact' }).click();
     await page.locator('#partner-contact').getByLabel('Phone').fill('0909 000 111');

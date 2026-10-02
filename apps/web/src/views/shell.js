@@ -1,9 +1,12 @@
+import { PARTNER_WELCOME_PATH } from '#domain';
 import { esc } from '../dom.js';
 import { getLang, t } from '../i18n.js';
-import { icon, navItem, visibleNav } from '../nav.js';
+import { FIND_MERCHANTS_PATH, icon, navItem, visibleNav } from '../nav.js';
 import { getTheme } from '../theme.js';
 import { brandPanel, mountBrand } from './brand.js';
+import { authLayout } from './common.js';
 import { counterPanel, mountCounter } from './counter.js';
+import { findMerchantsPanel, mountFindMerchants } from './find-merchants.js';
 import { merchantsPanel, mountMerchants } from './merchants.js';
 import { mountMy, myPanel } from './my.js';
 import { mountOverview, overviewNumbers, overviewWork } from './overview.js';
@@ -227,4 +230,23 @@ export function counterView(app) {
 export function myView(app) {
   render(app, '/my', myPanel());
   mountMy(app);
+}
+
+/**
+ * Inside MyConnect for a partner with merchants; a partner without any yet gets the plain page with a
+ * way back to its welcome page.
+ * @param {App} app
+ */
+export function findMerchantsView(app) {
+  if (app.state.profile?.activeRole) {
+    render(app, FIND_MERCHANTS_PATH, findMerchantsPanel({ framed: true }));
+  } else {
+    app.root.innerHTML = authLayout({
+      title: t('findMerchantsTitle'),
+      body: findMerchantsPanel({ framed: false }),
+      back: { href: PARTNER_WELCOME_PATH, label: t('partnerWelcomeDocTitle') },
+    });
+    document.title = `${t('findMerchantsTitle')} · MyConnect`;
+  }
+  mountFindMerchants(app);
 }
