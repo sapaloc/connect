@@ -2,6 +2,7 @@ import { authRoutes } from '../foundation/auth-routes.js';
 import { fileRoutes } from '../files/files.js';
 import { health } from '../foundation/health.js';
 import { userRoutes } from '../foundation/user-routes.js';
+import { applicationRoutes } from '../merchants/application-routes.js';
 import { dashboardRoutes } from '../merchants/dashboard.js';
 import { merchantRoutes } from '../merchants/merchant-routes.js';
 import { historyRoutes } from '../partners/history.js';
@@ -25,6 +26,7 @@ const definitions = [
   ...authRoutes,
   ...userRoutes,
   ...merchantRoutes,
+  ...applicationRoutes,
   ...partnerRoutes,
   ...referralRoutes,
   ...myRoutes,

@@ -1,6 +1,6 @@
 import { api } from '../api.js';
 import { $, busy, esc, formValues } from '../dom.js';
-import { errorText, t } from '../i18n.js';
+import { errorText, getLang, t } from '../i18n.js';
 import {
   authLayout,
   bindPasswordPolicy,
@@ -14,29 +14,155 @@ import { switchLabel } from './shell.js';
 
 /** @typedef {import('../main.js').App} App */
 
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+/** @type {Record<'signin' | 'register', string>} */
+const TAB_PATHS = { signin: '/login', register: '/register' };
+
+/** @param {import('../api.js').Profile} profile */
+function afterSignIn(profile) {
+  if (profile.mustChangePassword) return '/change-password';
+  return profile.activeRole ? /** @type {string} */ (profile.landing) : '/select-role';
+}
+
+/** @param {string} label */
+const optionalLabel = (label) => `${esc(label)} <span class="text-muted">(${esc(t('optional'))})</span>`;
+
 /** @param {App} app */
-export function loginView(app) {
+function signInPane(app) {
+  return `
+    <h1 class="h4 mb-1">${esc(t('signInTitle'))}</h1>
+    <p class="text-muted mb-4">${esc(t('signInSubtitle'))}</p>
+    <form id="sign-in" novalidate>
+      <div class="mb-3">
+        <label for="email" class="form-label">${esc(t('email'))}</label>
+        <input id="email" name="email" type="email" class="form-control form-control-lg"
+          autocomplete="username" value="${esc(app.state.prefillEmail)}" required />
+      </div>
+      <div class="mb-4">
+        <label for="password" class="form-label">${esc(t('password'))}</label>
+        ${passwordInput({ id: 'password', autocomplete: 'current-password' })}
+      </div>
+      <button type="submit" class="btn btn-primary btn-lg w-100">${esc(t('signIn'))}</button>
+      ${messageSlot()}
+      <p class="text-center small mt-3 mb-0"><a href="/forgot" data-nav>${esc(t('forgotLink'))}</a></p>
+    </form>`;
+}
+
+function registerPane() {
+  const lang = getLang();
+  return `
+    <h2 class="h4 mb-1">${esc(t('registerTitle'))}</h2>
+    <p class="text-muted mb-4">${esc(t('registerSubtitle'))}</p>
+    <form id="register" novalidate>
+      <div class="mb-3">
+        <label for="r-name" class="form-label">${esc(t('registerBusinessName'))}</label>
+        <input id="r-name" name="name" class="form-control" maxlength="120" autocomplete="organization" required />
+      </div>
+      <div class="row g-3 mb-3">
+        <div class="col-12 col-sm-6 col-md-12 col-lg-6">
+          <label for="r-phone" class="form-label">${optionalLabel(t('contactPhone'))}</label>
+          <input id="r-phone" name="contactPhone" type="tel" class="form-control" maxlength="32" autocomplete="tel" />
+        </div>
+        <div class="col-12 col-sm-6 col-md-12 col-lg-6">
+          <label for="r-contact-email" class="form-label">${optionalLabel(t('contactEmail'))}</label>
+          <input id="r-contact-email" name="contactEmail" type="email" class="form-control" maxlength="254" />
+        </div>
+      </div>
+      <div class="mb-3">
+        <label for="r-address" class="form-label">${optionalLabel(t('address'))}</label>
+        <input id="r-address" name="address" class="form-control" maxlength="300" autocomplete="street-address" />
+      </div>
+      <fieldset class="mb-3">
+        <legend class="form-label fw-semibold fs-6 mb-1">${esc(t('registerAdminTitle'))}</legend>
+        <p class="small text-muted mb-2">${esc(t('registerAdminHint'))}</p>
+        <div class="mb-3">
+          <label for="r-admin-name" class="form-label">${esc(t('registerAdminName'))}</label>
+          <input id="r-admin-name" name="adminName" class="form-control" maxlength="120" autocomplete="name" required />
+        </div>
+        <div class="row g-3">
+          <div class="col-8">
+            <label for="r-admin-email" class="form-label">${esc(t('email'))}</label>
+            <input id="r-admin-email" name="adminEmail" type="email" class="form-control" maxlength="254" autocomplete="email" required />
+          </div>
+          <div class="col-4">
+            <label for="r-admin-lang" class="form-label">${esc(t('language'))}</label>
+            <select id="r-admin-lang" name="adminLanguage" class="form-select" required>
+              <option value="en"${lang === 'en' ? ' selected' : ''}>EN</option>
+              <option value="vi"${lang === 'vi' ? ' selected' : ''}>VI</option>
+            </select>
+          </div>
+        </div>
+      </fieldset>
+      <div class="hp-field" aria-hidden="true">
+        <label for="r-website">Website</label>
+        <input id="r-website" name="website" tabindex="-1" autocomplete="off" />
+      </div>
+      <div class="form-check mb-4">
+        <input id="r-terms" name="acceptTerms" type="checkbox" class="form-check-input" required />
+        <label for="r-terms" class="form-check-label small">${esc(t('registerTerms'))}</label>
+      </div>
+      <button type="submit" class="btn btn-primary btn-lg w-100">${esc(t('registerSubmit'))}</button>
+      ${messageSlot('register-message')}
+    </form>`;
+}
+
+/**
+ * First problem of the register form as [field id, message], or null.
+ * @param {Record<string, string>} values
+ * @returns {[string, string] | null}
+ */
+function registerProblem(values) {
+  if (!values.name.trim()) return ['r-name', t('registerNameRequired')];
+  if (values.contactEmail.trim() && !EMAIL_PATTERN.test(values.contactEmail.trim())) return ['r-contact-email', t('registerEmailInvalid')];
+  if (!values.adminName.trim()) return ['r-admin-name', t('registerAdminNameRequired')];
+  if (!EMAIL_PATTERN.test(values.adminEmail.trim())) return ['r-admin-email', t('registerEmailInvalid')];
+  if (values.acceptTerms !== 'on') return ['r-terms', t('registerTermsRequired')];
+  return null;
+}
+
+/**
+ * Sign in and Register side by side from 768 px; tabs below that. `/register` opens the Register tab.
+ * @param {App} app
+ * @param {'signin' | 'register'} initial
+ */
+function accessView(app, initial) {
   app.root.innerHTML = authLayout({
-    title: t('signInTitle'),
-    subtitle: t('signInSubtitle'),
+    wide: true,
     back: { href: '/', label: t('backHome') },
     body: `
-      <form id="sign-in" novalidate>
-        <div class="mb-3">
-          <label for="email" class="form-label">${esc(t('email'))}</label>
-          <input id="email" name="email" type="email" class="form-control form-control-lg"
-            autocomplete="username" value="${esc(app.state.prefillEmail)}" required />
-        </div>
-        <div class="mb-4">
-          <label for="password" class="form-label">${esc(t('password'))}</label>
-          ${passwordInput({ id: 'password', autocomplete: 'current-password' })}
-        </div>
-        <button type="submit" class="btn btn-primary btn-lg w-100">${esc(t('signIn'))}</button>
-        ${messageSlot()}
-        <p class="text-center small mt-3 mb-0"><a href="/forgot" data-nav>${esc(t('forgotLink'))}</a></p>
-      </form>`,
+      <div class="auth-tabs" role="tablist" aria-label="${esc(t('signInOrRegister'))}">
+        <button type="button" role="tab" id="tab-signin" aria-controls="pane-signin" data-tab="signin">${esc(t('signIn'))}</button>
+        <button type="button" role="tab" id="tab-register" aria-controls="pane-register" data-tab="register">${esc(t('registerTab'))}</button>
+      </div>
+      <div class="auth-panes">
+        <section class="auth-pane" id="pane-signin" role="tabpanel" aria-labelledby="tab-signin">${signInPane(app)}</section>
+        <section class="auth-pane" id="pane-register" role="tabpanel" aria-labelledby="tab-register">${registerPane()}</section>
+      </div>`,
   });
   app.consumeFlash();
+
+  const panes = /** @type {HTMLElement} */ ($('.auth-panes'));
+  const tabs = /** @type {HTMLButtonElement[]} */ ([...app.root.querySelectorAll('[role="tab"]')]);
+  /** @param {'signin' | 'register'} tab @param {{ focus?: boolean }} [options] */
+  const select = (tab, { focus = false } = {}) => {
+    panes.dataset.tab = tab;
+    for (const button of tabs) {
+      const active = button.dataset.tab === tab;
+      button.setAttribute('aria-selected', String(active));
+      button.tabIndex = active ? 0 : -1;
+      if (active && focus) button.focus();
+    }
+    if (location.pathname !== TAB_PATHS[tab]) history.replaceState(null, '', TAB_PATHS[tab]);
+  };
+  select(initial);
+  for (const button of tabs) {
+    button.addEventListener('click', () => select(/** @type {'signin' | 'register'} */ (button.dataset.tab)));
+    button.addEventListener('keydown', (event) => {
+      if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+      event.preventDefault();
+      select(button.dataset.tab === 'signin' ? 'register' : 'signin', { focus: true });
+    });
+  }
 
   const form = /** @type {HTMLFormElement} */ ($('#sign-in'));
   form.addEventListener('submit', (event) => {
@@ -47,10 +173,109 @@ export function loginView(app) {
         const profile = await api('POST', '/api/v1/auth/login', { email, password });
         app.state.prefillEmail = '';
         app.setProfile(profile);
-        app.navigate(profile.activeRole ? profile.landing : '/select-role', { replace: true });
+        app.navigate(afterSignIn(profile), { replace: true });
       } catch (error) {
         showMessage(errorText(error));
         /** @type {HTMLInputElement} */ ($('#password')).value = '';
+      }
+    });
+  });
+
+  const register = /** @type {HTMLFormElement} */ ($('#register'));
+  register.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const values = formValues(register);
+    register.querySelectorAll('[aria-invalid]').forEach((field) => field.removeAttribute('aria-invalid'));
+    const problem = registerProblem(values);
+    if (problem) {
+      const field = $(`#${problem[0]}`);
+      field.setAttribute('aria-invalid', 'true');
+      field.focus();
+      showMessage(problem[1], 'error', 'register-message');
+      return;
+    }
+    busy(register, async () => {
+      try {
+        await api('POST', '/api/v1/merchant-applications', {
+          name: values.name,
+          contactPhone: values.contactPhone,
+          contactEmail: values.contactEmail,
+          address: values.address,
+          admin: { displayName: values.adminName, email: values.adminEmail, preferredLanguage: values.adminLanguage },
+          acceptTerms: true,
+          website: values.website ?? '',
+        });
+        const pane = $('#pane-register');
+        pane.innerHTML = `
+          <div class="register-done" tabindex="-1">
+            <h2 class="h4 mb-2">${esc(t('registerDoneTitle'))}</h2>
+            <p class="mb-2">${esc(t('registerDoneBody', { name: values.name.trim() }))}</p>
+            <p class="text-muted small mb-4">${esc(t('registerDoneNext', { email: values.adminEmail.trim().toLowerCase() }))}</p>
+            <button type="button" class="btn btn-outline-secondary w-100" data-goto-signin>${esc(t('backToSignIn'))}</button>
+          </div>`;
+        /** @type {HTMLElement} */ ($('.register-done', pane)).focus();
+        $('[data-goto-signin]', pane).addEventListener('click', () => select('signin', { focus: true }));
+      } catch (error) {
+        showMessage(errorText(error), 'error', 'register-message');
+      }
+    });
+  });
+}
+
+/** @param {App} app */
+export function loginView(app) {
+  accessView(app, 'signin');
+}
+
+/** @param {App} app */
+export function registerView(app) {
+  accessView(app, 'register');
+}
+
+/**
+ * Signed in with a temporary password: nothing else opens until it is replaced.
+ * @param {App} app
+ */
+export function changePasswordView(app) {
+  const profile = /** @type {import('../api.js').Profile} */ (app.state.profile);
+  app.root.innerHTML = authLayout({
+    title: t('changePasswordTitle'),
+    subtitle: t('changePasswordSubtitle'),
+    body: `
+      <form id="change-password" novalidate>
+        <div class="invite-who mb-3">
+          <div class="fw-semibold">${esc(profile.user.displayName)}</div>
+          <div class="small text-muted">${esc(profile.user.email)}</div>
+        </div>
+        <div class="mb-3">
+          <label for="current" class="form-label">${esc(t('temporaryPassword'))}</label>
+          ${passwordInput({ id: 'current', autocomplete: 'current-password' })}
+        </div>
+        ${passwordFields()}
+        <button type="submit" class="btn btn-primary btn-lg w-100">${esc(t('changePasswordSubmit'))}</button>
+        ${messageSlot()}
+        <p class="text-center small mt-3 mb-0"><a href="#" data-signout>${esc(t('signOut'))}</a></p>
+      </form>`,
+  });
+  document.title = `${t('changePasswordTitle')} · MyConnect`;
+
+  const form = /** @type {HTMLFormElement} */ ($('#change-password'));
+  bindPasswordPolicy(form);
+  form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const values = formValues(form);
+    const problem = values.current ? passwordProblem(values) : t('temporaryPasswordRequired');
+    if (problem) {
+      showMessage(problem);
+      return;
+    }
+    busy(form, async () => {
+      try {
+        const next = await api('POST', '/api/v1/auth/password/change', { currentPassword: values.current, newPassword: values.password });
+        app.setProfile(next);
+        app.navigate(afterSignIn(next), { replace: true });
+      } catch (error) {
+        showMessage(errorText(error));
       }
     });
   });

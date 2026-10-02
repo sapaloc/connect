@@ -1,19 +1,7 @@
 import { expect, test } from '@playwright/test';
-import { ACCOUNTS, newContext } from './support.js';
+import { ACCOUNTS, newContext, signIn } from './support.js';
 
 const PASSWORD = /** @type {string} */ (process.env.SEED_PASSWORD);
-
-/**
- * @param {import('@playwright/test').Page} page
- * @param {string} email
- * @param {string} password
- */
-async function signIn(page, email, password) {
-  await page.goto('/login');
-  await page.getByLabel('Email').fill(email);
-  await page.getByLabel('Password', { exact: true }).fill(password);
-  await page.getByRole('button', { name: 'Sign in' }).click();
-}
 
 test.describe('sign in', () => {
   for (const [name, { email, landing }] of Object.entries(ACCOUNTS)) {

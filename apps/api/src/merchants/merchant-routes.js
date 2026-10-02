@@ -28,8 +28,9 @@ function isDuplicateKey(error) {
 /**
  * @param {any} tenant
  * @param {Map<string, { admins: number, members: number }>} counts
+ * @param {Map<string, Array<{ userId: string, email: string, expiresAt: string | null }>>} [awaiting]
  */
-function merchantView(tenant, counts) {
+export function merchantView(tenant, counts, awaiting = new Map()) {
   const count = counts.get(tenant._id) ?? { admins: 0, members: 0 };
   return {
     id: tenant._id,
@@ -43,7 +44,37 @@ function merchantView(tenant, counts) {
     createdAt: tenant.createdAt.toISOString(),
     admins: count.admins,
     members: count.members,
+    awaitingFirstSignIn: awaiting.get(tenant._id) ?? [],
   };
+}
+
+/**
+ * Merchant admins who still have to replace their temporary password, per merchant.
+ * @param {string[]} tenantIds
+ */
+async function adminsAwaitingFirstSignIn(tenantIds) {
+  const users = await collection('users');
+  const rows = await users
+    .find(
+      {
+        status: 'ACTIVE',
+        mustChangePassword: true,
+        roles: { $elemMatch: { tenantId: { $in: tenantIds }, role: ROLES.TENANT_ADMIN, status: 'ACTIVE' } },
+      },
+      { projection: { email: 1, roles: 1, tempPasswordExpiresAt: 1 } },
+    )
+    .toArray();
+  /** @type {Map<string, Array<{ userId: string, email: string, expiresAt: string | null }>>} */
+  const byTenant = new Map();
+  for (const user of rows) {
+    for (const assignment of user.roles) {
+      if (assignment.role !== ROLES.TENANT_ADMIN || assignment.status !== 'ACTIVE' || !tenantIds.includes(assignment.tenantId)) continue;
+      const list = byTenant.get(assignment.tenantId) ?? [];
+      list.push({ userId: user._id, email: user.email, expiresAt: user.tempPasswordExpiresAt?.toISOString() ?? null });
+      byTenant.set(assignment.tenantId, list);
+    }
+  }
+  return byTenant;
 }
 
 /**
@@ -88,8 +119,59 @@ function optionalText(body, key, max) {
 async function listMerchants(_req, res) {
   const tenants = await collection('tenants');
   const rows = await tenants.find({}, { sort: { name: 1 } }).toArray();
-  const counts = await memberCounts(rows.map((tenant) => tenant._id));
-  sendJson(res, 200, { merchants: rows.map((tenant) => merchantView(tenant, counts)) });
+  const ids = rows.map((tenant) => tenant._id);
+  const [counts, awaiting] = await Promise.all([memberCounts(ids), adminsAwaitingFirstSignIn(ids)]);
+  sendJson(res, 200, { merchants: rows.map((tenant) => merchantView(tenant, counts, awaiting)) });
+}
+
+/** @typedef {{ name: string, slug: string, contactEmail: string | null, contactPhone: string | null, address: string | null }} MerchantFields */
+
+/**
+ * Name, link (slug, from the name when not given) and contact details of a new merchant.
+ * @param {Record<string, unknown>} body
+ * @returns {MerchantFields}
+ */
+export function parseMerchantFields(body) {
+  const name = stringField(body, 'name', { max: 120 }).trim();
+  if (!name) throw new HttpError(422, 'VALIDATION', 'name is required', { details: { field: 'name' } });
+  const slug = stringField(body, 'slug', { max: 48, optional: true }).trim().toLowerCase() || merchantSlug(name);
+  if (!MERCHANT_SLUG_PATTERN.test(slug)) throw new HttpError(422, 'VALIDATION', 'slug is invalid', { details: { field: 'slug' } });
+  const contactEmail = optionalText(body, 'contactEmail', 254)?.toLowerCase() ?? null;
+  if (contactEmail && !EMAIL_PATTERN.test(contactEmail)) {
+    throw new HttpError(422, 'VALIDATION', 'contactEmail is invalid', { details: { field: 'contactEmail' } });
+  }
+  return { name, slug, contactEmail, contactPhone: optionalText(body, 'contactPhone', 32), address: optionalText(body, 'address', 300) };
+}
+
+const merchantExists = () => new HttpError(409, 'MERCHANT_EXISTS', 'A merchant with this name or slug already exists');
+
+/**
+ * Inserts the ACTIVE merchant and its MERCHANT_CREATED audit event inside `tx`.
+ * @param {import('../http/router.js').Context} ctx
+ * @param {MerchantFields} fields
+ * @param {import('mongodb').ClientSession} tx
+ */
+export async function insertMerchant(ctx, fields, tx) {
+  const tenant = newTenant(fields);
+  const tenants = await collection('tenants');
+  try {
+    await tenants.insertOne(tenant, { session: tx });
+  } catch (error) {
+    if (isDuplicateKey(error)) throw merchantExists();
+    throw error;
+  }
+  await recordAudit(
+    {
+      ...actorOf(ctx),
+      tenantId: tenant._id,
+      eventType: 'MERCHANT_CREATED',
+      entityType: 'tenant',
+      entityId: tenant._id,
+      after: { name: fields.name, slug: fields.slug },
+    },
+    { session: tx },
+  );
+  return tenant;
 }
 
 /**
@@ -99,37 +181,16 @@ async function listMerchants(_req, res) {
 async function createMerchant(req, res, ctx) {
   const session = sessionOf(ctx);
   const body = await readJson(req);
-  const name = stringField(body, 'name', { max: 120 }).trim();
-  if (!name) throw new HttpError(422, 'VALIDATION', 'name is required', { details: { field: 'name' } });
-  const slug = stringField(body, 'slug', { max: 48, optional: true }).trim().toLowerCase() || merchantSlug(name);
-  if (!MERCHANT_SLUG_PATTERN.test(slug)) throw new HttpError(422, 'VALIDATION', 'slug is invalid', { details: { field: 'slug' } });
-  const contactEmail = optionalText(body, 'contactEmail', 254)?.toLowerCase() ?? null;
-  if (contactEmail && !EMAIL_PATTERN.test(contactEmail)) {
-    throw new HttpError(422, 'VALIDATION', 'contactEmail is invalid', { details: { field: 'contactEmail' } });
-  }
-  const contactPhone = optionalText(body, 'contactPhone', 32);
-  const address = optionalText(body, 'address', 300);
-
+  const fields = parseMerchantFields(body);
   const adminBody = body.admin && typeof body.admin === 'object' ? /** @type {Record<string, unknown>} */ (body.admin) : null;
   const admin = adminBody ? parseInvitee({ ...adminBody, role: ROLES.TENANT_ADMIN }, session) : null;
 
-  try {
-    const result = await withTransaction(async (tx) => {
-      const tenant = newTenant({ name, slug, contactEmail, contactPhone, address });
-      const tenants = await collection('tenants');
-      await tenants.insertOne(tenant, { session: tx });
-      await recordAudit(
-        { ...actorOf(ctx), tenantId: tenant._id, eventType: 'MERCHANT_CREATED', entityType: 'tenant', entityId: tenant._id, after: { name, slug } },
-        { session: tx },
-      );
-      const invitation = admin ? await inviteMember(req, ctx, { ...admin, tenantId: tenant._id }, tx) : null;
-      return { merchant: merchantView(tenant, new Map()), invitation };
-    });
-    sendJson(res, 201, result);
-  } catch (error) {
-    if (isDuplicateKey(error)) throw new HttpError(409, 'MERCHANT_EXISTS', 'A merchant with this name or slug already exists');
-    throw error;
-  }
+  const result = await withTransaction(async (tx) => {
+    const tenant = await insertMerchant(ctx, fields, tx);
+    const invitation = admin ? await inviteMember(req, ctx, { ...admin, tenantId: tenant._id }, tx) : null;
+    return { merchant: merchantView(tenant, new Map()), invitation };
+  });
+  sendJson(res, 201, result);
 }
 
 /**

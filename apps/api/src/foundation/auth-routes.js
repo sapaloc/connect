@@ -8,6 +8,7 @@ import {
   clearSessionCookie,
   createSession,
   loadSession,
+  revokeOtherSessions,
   revokeSession,
   revokeUserSessions,
 } from '../auth/session.js';
@@ -21,7 +22,8 @@ import { sendJson } from '../http/respond.js';
 
 /**
  * Payload for the web: who is signed in, which role is active, what it may do and where it lands.
- * @param {{ userId: string, email: string, displayName: string, preferredLanguage: string }} user
+ * `mustChangePassword`: signed in with a temporary password; nothing else works until it is changed.
+ * @param {{ userId: string, email: string, displayName: string, preferredLanguage: string, mustChangePassword?: boolean }} user
  * @param {import('../auth/session.js').RoleOption[]} roles
  * @param {string | null} roleAssignmentId
  */
@@ -34,6 +36,7 @@ function profile(user, roles, roleAssignmentId) {
       displayName: user.displayName,
       preferredLanguage: user.preferredLanguage,
     },
+    mustChangePassword: user.mustChangePassword === true,
     activeRole: active,
     roles,
     permissions: permissionsFor(active?.role),
@@ -72,7 +75,17 @@ async function login(req, res, ctx) {
   const account = email
     ? await users.findOne(
         { email },
-        { projection: { email: 1, displayName: 1, preferredLanguage: 1, status: 1, passwordHash: 1 } },
+        {
+          projection: {
+            email: 1,
+            displayName: 1,
+            preferredLanguage: 1,
+            status: 1,
+            passwordHash: 1,
+            mustChangePassword: 1,
+            tempPasswordExpiresAt: 1,
+          },
+        },
       )
     : null;
   const passwordOk = await verifyPassword(password, account?.passwordHash);
@@ -87,6 +100,19 @@ async function login(req, res, ctx) {
       correlationId: ctx.requestId,
     });
     throw invalidCredentials();
+  }
+
+  const mustChangePassword = account.mustChangePassword === true;
+  if (mustChangePassword && !(account.tempPasswordExpiresAt > new Date())) {
+    await recordAudit({
+      eventType: 'SIGN_IN_FAILED',
+      entityType: 'user_account',
+      entityId: account._id,
+      after: { email, ip },
+      reason: 'TEMP_PASSWORD_EXPIRED',
+      correlationId: ctx.requestId,
+    });
+    throw new HttpError(401, 'TEMP_PASSWORD_EXPIRED', 'This temporary password has expired. Ask the platform admin for a new one.');
   }
 
   const roles = await activeRoles(account._id);
@@ -118,8 +144,57 @@ async function login(req, res, ctx) {
     email: account.email,
     displayName: account.displayName,
     preferredLanguage: account.preferredLanguage,
+    mustChangePassword,
   };
   sendJson(res, 200, profile(user, roles, chosen?.roleAssignmentId ?? null), { 'Set-Cookie': cookie });
+}
+
+/**
+ * Signed-in user replaces the current password (required after a temporary one); other sessions end.
+ * @type {import('../http/router.js').Handler}
+ */
+async function changePassword(req, res, ctx) {
+  const session = /** @type {import('../auth/session.js').Session} */ (ctx.session);
+  const body = await readJson(req);
+  const currentPassword = stringField(body, 'currentPassword', { max: 256 });
+  const newPassword = stringField(body, 'newPassword', { max: 256 });
+  await consume(`password-change:user:${session.userId}`, RATE_LIMITS.passwordChangeUser);
+
+  const users = await collection('users');
+  const account = await users.findOne({ _id: session.userId, status: 'ACTIVE' }, { projection: { passwordHash: 1 } });
+  if (!account || !(await verifyPassword(currentPassword, account.passwordHash))) {
+    throw new HttpError(422, 'CURRENT_PASSWORD_WRONG', 'The current password is incorrect', { details: { field: 'currentPassword' } });
+  }
+  assertPasswordPolicy(newPassword);
+  if (newPassword === currentPassword) {
+    throw new HttpError(422, 'PASSWORD_UNCHANGED', 'Choose a password different from the current one', { details: { field: 'newPassword' } });
+  }
+  const passwordHash = await hashPassword(newPassword);
+
+  await withTransaction(async (tx) => {
+    const now = new Date();
+    await users.updateOne(
+      { _id: session.userId },
+      { $set: { passwordHash, passwordChangedAt: now, updatedAt: now }, $unset: { mustChangePassword: '', tempPasswordExpiresAt: '' } },
+      { session: tx },
+    );
+    await revokeOtherSessions(session.userId, session.sessionId, { session: tx });
+    await recordAudit(
+      {
+        eventType: 'PASSWORD_CHANGED',
+        tenantId: session.tenantId,
+        actorUserId: session.userId,
+        actorRoleAssignmentId: session.roleAssignmentId,
+        entityType: 'user_account',
+        entityId: session.userId,
+        after: { temporaryReplaced: session.mustChangePassword },
+        correlationId: ctx.requestId,
+      },
+      { session: tx },
+    );
+  });
+  const roles = await activeRoles(session.userId);
+  sendJson(res, 200, profile({ ...session, mustChangePassword: false }, roles, session.roleAssignmentId));
 }
 
 /** @type {import('../http/router.js').Handler} */
@@ -319,7 +394,11 @@ async function confirmPasswordReset(req, res, ctx) {
     const userId = found.user._id;
     const now = new Date();
     const users = await collection('users');
-    await users.updateOne({ _id: userId }, { $set: { passwordHash, passwordChangedAt: now, updatedAt: now } }, { session });
+    await users.updateOne(
+      { _id: userId },
+      { $set: { passwordHash, passwordChangedAt: now, updatedAt: now }, $unset: { mustChangePassword: '', tempPasswordExpiresAt: '' } },
+      { session },
+    );
     const resets = await collection('passwordResets');
     await resets.updateMany({ userId, usedAt: null, revokedAt: null }, { $set: { revokedAt: now } }, { session });
     await revokeUserSessions(userId, { session });
@@ -342,7 +421,8 @@ async function confirmPasswordReset(req, res, ctx) {
 export const authRoutes = [
   { method: 'POST', path: '/api/v1/auth/login', handler: login },
   { method: 'POST', path: '/api/v1/auth/logout', handler: logout },
-  { method: 'GET', path: '/api/v1/auth/me', handler: authed(me, { allowNoRole: true }) },
+  { method: 'GET', path: '/api/v1/auth/me', handler: authed(me, { allowNoRole: true, allowPasswordChange: true }) },
+  { method: 'POST', path: '/api/v1/auth/password/change', handler: authed(changePassword, { allowNoRole: true, allowPasswordChange: true }) },
   { method: 'POST', path: '/api/v1/auth/select-role', handler: authed(selectRole, { allowNoRole: true }) },
   { method: 'POST', path: '/api/v1/auth/invitations/inspect', handler: inspectInvitation },
   { method: 'POST', path: '/api/v1/auth/invitations/accept', handler: acceptInvitation },

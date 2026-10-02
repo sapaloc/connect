@@ -9,7 +9,7 @@ import { closeClient, COLLECTIONS, getDb } from './mongo.js';
  * Bump when a validator or index changes. Changes must keep old documents valid
  * (add optional fields; backfill in a script before making a field required).
  */
-export const SCHEMA_VERSION = 10;
+export const SCHEMA_VERSION = 11;
 
 const DAY_SECONDS = 24 * 60 * 60;
 const uuid = { bsonType: 'string', pattern: '^[0-9a-f-]{36}$' };
@@ -121,6 +121,7 @@ const DEFINITIONS = {
         { properties: { status: { enum: ['ACTIVE'] }, passwordHash: text }, required: ['passwordHash'] },
       ],
     },
+    // mustChangePassword and tempPasswordExpiresAt (temporary password) are optional and not in the validator (no collMod).
     indexes: [
       { key: { email: 1 }, name: 'email_uq', unique: true },
       { key: { 'roles._id': 1 }, name: 'role_assignment_id' },
@@ -534,6 +535,45 @@ const DEFINITIONS = {
     indexes: [
       { key: { redemptionId: 1 }, name: 'redemption_uq', unique: true },
       { key: { tenantId: 1, partnerId: 1, status: 1 }, name: 'tenant_partner_status' },
+    ],
+  },
+
+  // A business asking to join from the sign-in page; a Platform admin approves (creates the merchant) or rejects.
+  [COLLECTIONS.merchantApplications]: {
+    schema: {
+      bsonType: 'object',
+      required: ['_id', 'status', 'name', 'slug', 'admin', 'termsAcceptedAt', 'createdAt', 'updatedAt'],
+      properties: {
+        _id: uuid,
+        status: { enum: ['PENDING', 'APPROVED', 'REJECTED'] },
+        name: text,
+        slug: text,
+        contactEmail: { bsonType: ['string', 'null'] },
+        contactPhone: { bsonType: ['string', 'null'] },
+        address: { bsonType: ['string', 'null'] },
+        admin: {
+          bsonType: 'object',
+          required: ['email', 'displayName', 'preferredLanguage'],
+          properties: {
+            email: { bsonType: 'string', pattern: '^[^A-Z]+$' },
+            displayName: text,
+            preferredLanguage: { enum: ['en', 'vi'] },
+          },
+        },
+        termsAcceptedAt: date,
+        createdAt: date,
+        updatedAt: date,
+        reviewedBy: nullableUuid,
+        reviewedAt: nullableDate,
+        rejectReason: { bsonType: ['string', 'null'] },
+        tenantId: nullableUuid,
+        userId: nullableUuid,
+      },
+    },
+    indexes: [
+      { key: { 'admin.email': 1 }, name: 'pending_email_uq', unique: true, partialFilterExpression: { status: 'PENDING' } },
+      { key: { slug: 1 }, name: 'pending_slug_uq', unique: true, partialFilterExpression: { status: 'PENDING' } },
+      { key: { status: 1, createdAt: 1 }, name: 'status_created' },
     ],
   },
 

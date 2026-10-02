@@ -5,7 +5,7 @@ import { errorText, getLang, setLang, t } from './i18n.js';
 import { canOpen, navItem } from './nav.js';
 import { applyTheme, toggleTheme } from './theme.js';
 import { stopScanner } from './scanner.js';
-import { forgotView, inviteView, loginView, resetView, selectRoleView } from './views/auth.js';
+import { changePasswordView, forgotView, inviteView, loginView, registerView, resetView, selectRoleView } from './views/auth.js';
 import { homeView } from './views/home.js';
 import { showMessage, togglePasswordReveal } from './views/common.js';
 import { brandView, consoleView, counterView, merchantsView, myView, partnersView, teamView, vouchersView } from './views/shell.js';
@@ -24,7 +24,14 @@ import { voucherPublicView } from './views/voucher-public.js';
  */
 
 /** @type {Record<string, (app: App) => void>} */
-const PUBLIC_ROUTES = { '/': homeView, '/login': loginView, '/forgot': forgotView, '/invite': inviteView, '/reset': resetView };
+const PUBLIC_ROUTES = {
+  '/': homeView,
+  '/login': loginView,
+  '/register': registerView,
+  '/forgot': forgotView,
+  '/invite': inviteView,
+  '/reset': resetView,
+};
 
 /** Signed-in pages; who may open each one is declared in nav.js. */
 /** @type {Record<string, (app: App) => void>} */
@@ -77,11 +84,16 @@ function route() {
   const referralPath = /^\/r\/([^/]+)$/.exec(path);
   if (referralPath) return referralPublicView(app, decodeURIComponent(referralPath[1]));
   if (PUBLIC_ROUTES[path]) {
-    if (path === '/login' && profile?.activeRole) return app.navigate(/** @type {string} */ (profile.landing), { replace: true });
+    if ((path === '/login' || path === '/register') && profile?.activeRole) {
+      return app.navigate(/** @type {string} */ (profile.landing), { replace: true });
+    }
     PUBLIC_ROUTES[path](app);
     return loadHealth();
   }
   if (!profile) return app.navigate('/login', { replace: true });
+  if (profile.mustChangePassword) {
+    return path === '/change-password' ? changePasswordView(app) : app.navigate('/change-password', { replace: true });
+  }
   if (path === '/select-role') return selectRoleView(app);
   if (!profile.activeRole) return app.navigate('/select-role', { replace: true });
 
