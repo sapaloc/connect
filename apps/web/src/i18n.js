@@ -341,7 +341,6 @@ const messages = {
     voidRedemption: 'Huỷ lượt dùng',
     voidRedemptionPrompt: 'Lý do huỷ lượt dùng voucher {code} (ví dụ nhập sai số tiền). Voucher sẽ dùng lại được nếu còn hạn, hoa hồng của lượt này bị huỷ:',
     redemptionVoided: 'Đã huỷ lượt dùng của voucher {code}.',
-    partnerCounts: '{opens} lượt mở link · {activations} voucher đã nhận · {redemptions} lượt dùng',
     commissionOwed: 'Hoa hồng chưa trả',
     commissionPaid: 'Hoa hồng đã trả',
     lastPaid: 'Trả gần nhất: {date}',
@@ -536,7 +535,8 @@ const messages = {
     customerName: 'Customer name',
     note: 'Internal note',
     voucherCreate: 'Issue vouchers',
-    vouchersCreated: '{count} voucher(s) issued.',
+    vouchersCreated: '{count} vouchers issued.',
+    vouchersCreated_one: '1 voucher issued.',
     voucherListTitle: 'Vouchers',
     voucherSearch: 'Search code or customer',
     allStatuses: 'All statuses',
@@ -713,6 +713,7 @@ const messages = {
     redeemUnconfirmed: 'Not confirmed by the guest: recorded with a bill photo.',
     commissionPending: 'Commission waiting for review',
     commissionPendingLine: 'Waiting for review: {amount} ({count} bills not confirmed by the guest)',
+    commissionPendingLine_one: 'Waiting for review: {amount} (1 bill not confirmed by the guest)',
     reviewOpen: 'Review bills',
     reviewTitle: 'Bills to review for {name}',
     reviewHint: 'The guest could not confirm these bills. Check the bill photo: approve to count the commission, reject for no commission (the guest already got the discount).',
@@ -752,7 +753,6 @@ const messages = {
     voidRedemption: 'Void redemption',
     voidRedemptionPrompt: 'Reason for voiding the redemption of {code} (e.g. wrong amount). The voucher can be used again if still valid; its commission is voided:',
     redemptionVoided: 'Redemption of {code} voided.',
-    partnerCounts: '{opens} link opens · {activations} vouchers taken · {redemptions} redemptions',
     commissionOwed: 'Commission unpaid',
     commissionPaid: 'Commission paid',
     lastPaid: 'Last paid: {date}',
@@ -844,7 +844,8 @@ export function setLang(lang) {
  * @param {Record<string, string | number>} [params]
  */
 export function t(key, params = {}) {
-  const template = messages[getLang()][key] ?? messages.en[key] ?? key;
+  const one = params.count === 1 ? `${key}_one` : '';
+  const template = (one && (messages[getLang()][one] ?? messages.en[one])) || messages[getLang()][key] || messages.en[key] || key;
   return template.replace(/\{(\w+)\}/g, (_match, name) => String(params[name] ?? ''));
 }
 
@@ -874,6 +875,15 @@ export function formatVnd(amount) {
   return new Intl.NumberFormat(getLang() === 'vi' ? 'vi-VN' : 'en-US', { style: 'currency', currency: 'VND', maximumFractionDigits: 0 }).format(
     Number(toVnd(amount)),
   );
+}
+
+/**
+ * A typed whole amount with thousands separators, for VND inputs ("150000" → "150,000" / "150.000").
+ * @param {string} value
+ */
+export function groupDigits(value) {
+  const digits = value.replace(/\D/g, '');
+  return digits ? Number(digits).toLocaleString(getLang() === 'vi' ? 'vi-VN' : 'en-US') : '';
 }
 
 /** @param {string | Date} value */

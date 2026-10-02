@@ -1,7 +1,7 @@
 import { api } from '../api.js';
 import { $, esc, formValues } from '../dom.js';
 import { errorText, formatDateTime, formatVnd, t } from '../i18n.js';
-import { downloadBlob, partnerQrImage, referralLink, referralQrDataUrl, ruleDiscount, ruleTerms, sharePartnerQr } from '../voucher-ui.js';
+import { downloadBlob, partnerQrImage, referralLink, referralQrDataUrl, ruleDiscount, ruleTerms, sharePartnerQr, shortLink } from '../voucher-ui.js';
 import { messageSlot, showMessage } from './common.js';
 
 /** @typedef {import('../main.js').App} App */
@@ -90,14 +90,14 @@ export async function mountMy(app) {
         <h2 class="h5 mb-2">${esc(partner.name)}</h2>
         ${
           rule
-            ? `<p class="small mb-3">${esc(t(rule.customerDiscountAmount ? 'myRuleLine' : 'myRuleLinePercent', ruleTerms(rule)))}</p>`
+            ? `<p class="small mb-3 text-balance">${esc(t(rule.customerDiscountAmount ? 'myRuleLine' : 'myRuleLinePercent', ruleTerms(rule)))}</p>`
             : ''
         }
         ${partner.status === 'PAUSED' ? `<p class="form-message" data-tone="error">${esc(t('myPaused'))}</p>` : ''}
         ${
           share
             ? `<div class="partner-qr"><img id="my-qr" alt="QR ${esc(partner.name)}" width="240" height="240" /></div>
-               <p class="partner-qr-link small font-monospace text-center" translate="no">${esc(referralLink(share.token))}</p>
+               <p class="partner-qr-link small font-monospace text-center" translate="no" title="${esc(referralLink(share.token))}">${esc(shortLink(referralLink(share.token)))}</p>
                <div class="vcard-actions">
                  <button type="button" class="btn btn-primary" data-my-share>${esc(t('share'))}</button>
                  <button type="button" class="btn btn-outline-secondary" data-my-download>${esc(t('downloadImage'))}</button>
@@ -108,14 +108,20 @@ export async function mountMy(app) {
         }
       </section>
 
-      <section class="grid-kpi">
+      <section class="grid-kpi grid-kpi-3">
         ${kpi(t('kpiOpens'), stats.opens)}
         ${kpi(t('kpiActivations'), stats.activations)}
         ${kpi(t('kpiRedemptions'), stats.redemptions)}
+      </section>
+      <section class="grid-kpi">
         ${kpi(t('commissionOwed'), formatVnd(stats.commissionOpen))}
         ${kpi(t('commissionPaid'), formatVnd(stats.commissionPaid))}
-        ${stats.pendingReviews ? kpi(t('commissionPending'), formatVnd(stats.commissionPending)) : ''}
       </section>
+      ${
+        stats.pendingReviews
+          ? `<p class="partner-pending small mb-0">${esc(t('commissionPendingLine', { amount: formatVnd(stats.commissionPending), count: stats.pendingReviews }))}</p>`
+          : ''
+      }
 
       <section class="card-sw">
         <h3 class="card-title">${esc(t('myRecent'))}</h3>
