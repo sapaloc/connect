@@ -1,8 +1,9 @@
 import { api } from '../api.js';
 import { $, esc, formValues } from '../dom.js';
-import { errorText, formatDateTime, formatVnd, t } from '../i18n.js';
-import { downloadBlob, partnerQrImage, referralLink, referralQrDataUrl, ruleDiscount, ruleTerms, sharePartnerQr } from '../voucher-ui.js';
+import { errorText, formatVnd, t } from '../i18n.js';
+import { downloadBlob, partnerQrImage, referralLink, referralQrDataUrl, ruleDiscount, ruleTerms, sharePartnerQr, shortLink } from '../voucher-ui.js';
 import { messageSlot, showMessage } from './common.js';
+import { historyBlock, mountHistory, openPayout, payoutItem } from './history.js';
 
 /** @typedef {import('../main.js').App} App */
 
@@ -79,6 +80,7 @@ export async function mountMy(app) {
   try {
     const data = await api('GET', '/api/v1/my/partner');
     const { partner, rule, qr, stats, recent, payouts } = data;
+    const hasActivity = recent.length > 0 || stats.pendingReviews > 0;
     const share = qr
       ? { token: qr.token, merchantName: partner.merchantName ?? 'MyConnect', partnerName: partner.name, discount: ruleDiscount(rule), brand: partner.brand }
       : null;
@@ -90,14 +92,14 @@ export async function mountMy(app) {
         <h2 class="h5 mb-2">${esc(partner.name)}</h2>
         ${
           rule
-            ? `<p class="small mb-3">${esc(t(rule.customerDiscountAmount ? 'myRuleLine' : 'myRuleLinePercent', ruleTerms(rule)))}</p>`
+            ? `<p class="small mb-3 text-balance">${esc(t(rule.customerDiscountAmount ? 'myRuleLine' : 'myRuleLinePercent', ruleTerms(rule)))}</p>`
             : ''
         }
         ${partner.status === 'PAUSED' ? `<p class="form-message" data-tone="error">${esc(t('myPaused'))}</p>` : ''}
         ${
           share
             ? `<div class="partner-qr"><img id="my-qr" alt="QR ${esc(partner.name)}" width="240" height="240" /></div>
-               <p class="partner-qr-link small font-monospace text-center" translate="no">${esc(referralLink(share.token))}</p>
+               <p class="partner-qr-link small font-monospace text-center" translate="no" title="${esc(referralLink(share.token))}">${esc(shortLink(referralLink(share.token)))}</p>
                <div class="vcard-actions">
                  <button type="button" class="btn btn-primary" data-my-share>${esc(t('share'))}</button>
                  <button type="button" class="btn btn-outline-secondary" data-my-download>${esc(t('downloadImage'))}</button>
@@ -108,52 +110,42 @@ export async function mountMy(app) {
         }
       </section>
 
-      <section class="grid-kpi">
+      <section class="grid-kpi grid-kpi-3">
         ${kpi(t('kpiOpens'), stats.opens)}
         ${kpi(t('kpiActivations'), stats.activations)}
         ${kpi(t('kpiRedemptions'), stats.redemptions)}
+      </section>
+      <section class="grid-kpi">
         ${kpi(t('commissionOwed'), formatVnd(stats.commissionOpen))}
         ${kpi(t('commissionPaid'), formatVnd(stats.commissionPaid))}
-        ${stats.pendingReviews ? kpi(t('commissionPending'), formatVnd(stats.commissionPending)) : ''}
       </section>
+      ${
+        stats.pendingReviews
+          ? `<p class="partner-pending small mb-0">${esc(t('commissionPendingLine', { amount: formatVnd(stats.commissionPending), count: stats.pendingReviews }))}</p>`
+          : ''
+      }
 
-      <section class="card-sw">
-        <h3 class="card-title">${esc(t('myRecent'))}</h3>
-        ${
-          recent.length
-            ? `<ul class="my-recent">${recent
-                .map(
-                  (/** @type {any} */ item) => `
-                <li>
-                  <span class="text-muted small">${esc(formatDateTime(item.redeemedAt))}</span>
-                  <span class="fw-semibold${item.status === 'VOID' ? ' text-decoration-line-through text-muted' : ''}">${esc(formatVnd(item.amount))}</span>
-                  <span class="pill pill-${item.status === 'VOID' ? 'void' : item.status === 'PAID' ? 'redeemed' : 'unpaid'}">${esc(t(`cstatus_${item.status}`))}</span>
-                </li>`,
-                )
-                .join('')}</ul>`
-            : `<p class="text-muted small mb-0">${esc(t('myNoRecent'))}</p>`
-        }
+      <section class="card-sw" id="my-history">
+        <h3 class="card-title">${esc(t('historyTitle'))}</h3>
+        ${hasActivity ? historyBlock('my-h') : `<p class="text-muted small mb-0">${esc(t('myNoRecent'))}</p>`}
       </section>
 
       <section class="card-sw">
         <h3 class="card-title">${esc(t('myPayouts'))}</h3>
         ${
           payouts.length
-            ? `<ul class="my-recent">${payouts
-                .map(
-                  (/** @type {any} */ payout) => `
-                <li>
-                  <span class="text-muted small">${esc(formatDateTime(payout.paidAt))} · ${esc(t('myPayoutBills', { count: payout.itemCount }))}</span>
-                  <span class="fw-semibold">${esc(formatVnd(payout.amount))}</span>
-                  <span class="pill pill-redeemed">${esc(t('cstatus_PAID'))}</span>
-                </li>`,
-                )
-                .join('')}</ul>`
+            ? `<ul class="payout-list" id="my-payouts">${payouts.map(payoutItem).join('')}</ul>`
             : `<p class="text-muted small mb-0">${esc(t('myNoPayouts'))}</p>`
         }
         <p class="small text-muted mt-3 mb-0">${esc(t('myPayNote'))}</p>
       </section>
       ${partner.status === 'ENDED' ? '' : contactCard(partner)}`;
+
+    if (hasActivity) mountHistory(page, 'my-h', { url: '/api/v1/my/partner/history', withCode: false });
+    page.querySelector('#my-payouts')?.addEventListener('click', (event) => {
+      const id = /** @type {HTMLElement} */ (event.target).closest('[data-payout]')?.getAttribute('data-payout');
+      if (id) openPayout(`/api/v1/my/partner/payouts/${encodeURIComponent(id)}`, false).catch((error) => showMessage(errorText(error), 'error', 'my-message'));
+    });
 
     const contactForm = /** @type {HTMLFormElement | null} */ (page.querySelector('#my-contact'));
     contactForm?.addEventListener('submit', async (event) => {

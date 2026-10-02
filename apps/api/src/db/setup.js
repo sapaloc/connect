@@ -9,7 +9,7 @@ import { closeClient, COLLECTIONS, getDb } from './mongo.js';
  * Bump when a validator or index changes. Changes must keep old documents valid
  * (add optional fields; backfill in a script before making a field required).
  */
-export const SCHEMA_VERSION = 9;
+export const SCHEMA_VERSION = 10;
 
 const DAY_SECONDS = 24 * 60 * 60;
 const uuid = { bsonType: 'string', pattern: '^[0-9a-f-]{36}$' };
@@ -257,6 +257,7 @@ const DEFINITIONS = {
       { key: { batchId: 1 }, name: 'batch', partialFilterExpression: { batchId: { $type: 'string' } } },
       { key: { mediumId: 1, browserContextId: 1, status: 1 }, name: 'referral_browser', partialFilterExpression: { source: 'REFERRAL' } },
       { key: { partnerId: 1, createdAt: -1 }, name: 'referral_partner', partialFilterExpression: { source: 'REFERRAL' } },
+      { key: { tenantId: 1, 'redemption.redeemedAt': -1 }, name: 'tenant_redeemed', partialFilterExpression: { 'redemption.redeemedAt': { $exists: true } } },
     ],
   },
 
@@ -404,6 +405,7 @@ const DEFINITIONS = {
       { key: { redemptionId: 1, obligationType: 1 }, name: 'redemption_obligation_uq', unique: true },
       { key: { tenantId: 1, partnerId: 1, status: 1 }, name: 'tenant_partner_status' },
       { key: { partnerId: 1, redeemedAt: -1 }, name: 'partner_redeemed' },
+      { key: { payoutId: 1 }, name: 'payout', partialFilterExpression: { payoutId: { $type: 'string' } } },
     ],
   },
 

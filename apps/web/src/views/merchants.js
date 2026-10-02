@@ -1,6 +1,6 @@
 import { api } from '../api.js';
 import { $, busy, esc, formValues } from '../dom.js';
-import { errorText, formatDateTime, getLang, t } from '../i18n.js';
+import { errorText, formatDate, formatDateTime, getLang, t } from '../i18n.js';
 import { prepareLogo } from '../image.js';
 import { messageSlot, showLink, showMessage } from './common.js';
 
@@ -151,7 +151,7 @@ export function mountMerchants(_app) {
           </td>
           <td data-label="${esc(t('merchantPeople'))}">${esc(t('merchantAdminsCount', { admins: m.admins, members: m.members }))}</td>
           <td data-label="${esc(t('status'))}"><span class="pill pill-${esc(m.status.toLowerCase())}">${esc(t(`status_${m.status}`))}</span></td>
-          <td data-label="${esc(t('createdAt'))}">${esc(formatDateTime(m.createdAt))}</td>
+          <td data-label="${esc(t('createdAt'))}" class="text-nowrap">${esc(formatDate(m.createdAt))}</td>
           <td class="text-md-end">
             <div class="d-flex flex-wrap gap-2 justify-content-md-end">
               ${m.status === 'ACTIVE' ? `<button type="button" class="btn btn-sm btn-outline-secondary" data-invite="${esc(m.id)}">${esc(t('inviteAdmin'))}</button>` : ''}

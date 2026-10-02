@@ -1,10 +1,11 @@
 import { fixedRuleFromAmounts, isFixedRule, PARTNER_TYPES, percentRuleFromPercents, PRICING_MODELS, ratePercent, toVnd } from '#domain';
 import { api } from '../api.js';
 import { $, busy, esc, formValues } from '../dom.js';
-import { errorText, formatDateTime, formatVnd, getLang, t } from '../i18n.js';
-import { downloadBlob, partnerQrImage, referralLink, referralQrDataUrl, ruleDiscount, ruleTerms, sharePartnerQr } from '../voucher-ui.js';
+import { errorText, formatDateTime, formatVnd, getLang, groupDigits, t } from '../i18n.js';
+import { downloadBlob, partnerQrImage, referralLink, referralQrDataUrl, ruleDiscount, ruleTerms, sharePartnerQr, shortLink } from '../voucher-ui.js';
 import { icon } from '../nav.js';
 import { messageSlot, showLink, showMessage } from './common.js';
+import { historyBlock, mountHistory, openDialog, openPayout, payoutItem } from './history.js';
 import { billPhotoList } from './voucher-card.js';
 
 /** @typedef {import('../main.js').App} App */
@@ -46,9 +47,6 @@ const MODELS = [PRICING_MODELS.FIXED_AMOUNT, PRICING_MODELS.PERCENT];
 /** @param {string} value typed amount, with or without thousands separators */
 const digitsOf = (value) => value.replace(/\D/g, '');
 
-/** @param {string} digits */
-const grouped = (digits) => (digits ? Number(digits).toLocaleString(getLang() === 'vi' ? 'vi-VN' : 'en-US') : '');
-
 /** @param {string} value typed percent; a comma works as the decimal point */
 const percentOf = (value) => value.replace(',', '.').replace(/[^\d.]/g, '');
 
@@ -59,7 +57,7 @@ const percentOf = (value) => value.replace(',', '.').replace(/[^\d.]/g, '');
  */
 function ruleFields(prefix, rule = null) {
   const model = rule && !isFixedRule(rule) ? PRICING_MODELS.PERCENT : PRICING_MODELS.FIXED_AMOUNT;
-  const amount = (/** @type {string | null | undefined} */ value) => (value && model === PRICING_MODELS.FIXED_AMOUNT ? grouped(toVnd(value)) : '');
+  const amount = (/** @type {string | null | undefined} */ value) => (value && model === PRICING_MODELS.FIXED_AMOUNT ? groupDigits(toVnd(value)) : '');
   const percent = (/** @type {string | null | undefined} */ rate) => (rate && model === PRICING_MODELS.PERCENT ? ratePercent(rate) : '');
   const commissionRate = rule?.companyCommissionRate ?? rule?.individualCommissionRate;
   /** @param {string} name @param {string} label @param {string} value @param {string} placeholder @param {string} mode */
@@ -97,7 +95,7 @@ function bindRulePreview(form, prefix, kindOf) {
   const preview = $(`#${prefix}-preview`, form);
   const update = (/** @type {Event} [event] */ event) => {
     const input = /** @type {HTMLInputElement | undefined} */ (event?.target);
-    if (input && AMOUNT_FIELDS.includes(input.name)) input.value = grouped(digitsOf(input.value));
+    if (input && AMOUNT_FIELDS.includes(input.name)) input.value = groupDigits(digitsOf(input.value));
     if (input && PERCENT_FIELDS.includes(input.name)) input.value = percentOf(input.value);
     const payload = rulePayload(form);
     const percent = payload.pricingModel === PRICING_MODELS.PERCENT;
@@ -318,7 +316,7 @@ function qrDialog(partner, { manage, onReplaced }) {
         <p class="small text-muted">${esc(t('partnerQrHint'))}</p>
         ${current.status === 'PAUSED' ? `<p class="form-message" data-tone="error">${esc(t('partnerQrPaused'))}</p>` : ''}
         <div class="partner-qr"><img alt="QR ${esc(current.name)}" width="240" height="240" /></div>
-        <p class="partner-qr-link small font-monospace text-center" translate="no">${esc(link)}</p>
+        <p class="partner-qr-link small font-monospace text-center" translate="no" title="${esc(link)}">${esc(shortLink(link))}</p>
         <div class="vcard-actions">
           <button type="button" class="btn btn-primary" data-qr-share>${esc(t('share'))}</button>
           <button type="button" class="btn btn-outline-secondary" data-qr-download>${esc(t('downloadImage'))}</button>
@@ -376,29 +374,43 @@ function qrDialog(partner, { manage, onReplaced }) {
 }
 
 /**
- * Counts, and for roles that see commission: unpaid, paid and the "Mark as paid" button.
+ * Counts, and for roles that see commission: unpaid, paid, "Mark as paid", "Review bills" and "History".
  * @param {Partner} p
- * @param {boolean} settle
+ * @param {{ settle: boolean, history: boolean }} options
  */
-function partnerStatsLine(p, settle) {
+function partnerStatsLine(p, { settle, history }) {
   const stats = /** @type {NonNullable<Partner['stats']>} */ (p.stats);
-  const counts = t('partnerCounts', { opens: stats.opens, activations: stats.activations, redemptions: stats.redemptions });
-  const unpaid = stats.commissionOpen !== undefined && stats.commissionOpen !== '0.0000';
+  const money = stats.commissionOpen !== undefined;
+  const unpaid = money && stats.commissionOpen !== '0.0000';
   const pending = stats.pendingReviews ?? 0;
+  /** @param {string} label @param {string | number} value @param {string} [extra] */
+  const stat = (label, value, extra = '') => `
+      <div class="partner-stat${extra}"><dt>${esc(label)}</dt><dd>${esc(String(value))}</dd></div>`;
+  const buttons = [
+    settle && unpaid ? `<button type="button" class="btn btn-sm btn-primary" data-action="pay" data-id="${esc(p.id)}">${esc(t('markPaid'))}</button>` : '',
+    settle && pending ? `<button type="button" class="btn btn-sm btn-outline-secondary" data-action="review" data-id="${esc(p.id)}">${esc(t('reviewOpen'))}</button>` : '',
+    history && money ? `<button type="button" class="btn btn-sm btn-outline-secondary" data-action="history" data-id="${esc(p.id)}">${esc(t('historyButton'))}</button>` : '',
+  ].join('');
   return `
-    <div class="small mb-1 partner-stats">
-      <span class="text-muted">${esc(counts)}</span>
-      ${
-        stats.commissionOpen !== undefined
-          ? `<span class="d-block">${esc(t('commissionOwed'))}: <strong>${esc(formatVnd(stats.commissionOpen))}</strong>
-             · ${esc(t('commissionPaid'))}: <strong>${esc(formatVnd(stats.commissionPaid ?? '0'))}</strong></span>
-             ${pending ? `<span class="d-block">${esc(t('commissionPendingLine', { amount: formatVnd(stats.commissionPending ?? '0'), count: pending }))}</span>` : ''}
-             ${stats.lastPaidAt ? `<span class="d-block text-muted">${esc(t('lastPaid', { date: formatDateTime(stats.lastPaidAt) }))}</span>` : ''}
-             ${settle && unpaid ? `<button type="button" class="btn btn-sm btn-primary mt-2" data-action="pay" data-id="${esc(p.id)}">${esc(t('markPaid'))}</button>` : ''}
-             ${settle && pending ? `<button type="button" class="btn btn-sm btn-outline-primary mt-2" data-action="review" data-id="${esc(p.id)}">${esc(t('reviewOpen'))}</button>` : ''}`
-          : ''
-      }
-    </div>`;
+    <dl class="partner-stats">
+      ${stat(t('kpiOpens'), stats.opens)}
+      ${stat(t('kpiActivations'), stats.activations)}
+      ${stat(t('kpiRedemptions'), stats.redemptions)}
+      ${money ? stat(t('commissionOwed'), formatVnd(stats.commissionOpen ?? '0'), ' is-money') : ''}
+      ${money ? stat(t('commissionPaid'), formatVnd(stats.commissionPaid ?? '0'), ' is-money') : ''}
+    </dl>
+    ${pending ? `<p class="partner-pending small">${esc(t('commissionPendingLine', { amount: formatVnd(stats.commissionPending ?? '0'), count: pending }))}</p>` : ''}
+    ${money && stats.lastPaidAt ? `<p class="small text-muted mb-0">${esc(t('lastPaid', { date: formatDateTime(stats.lastPaidAt) }))}</p>` : ''}
+    ${buttons ? `<div class="partner-actions">${buttons}</div>` : ''}`;
+}
+
+/**
+ * Contact details not already shown in the account list.
+ * @param {Partner} p
+ */
+function extraContact(p) {
+  const known = new Set(p.accounts.flatMap((a) => [a.displayName.trim().toLowerCase(), a.email.toLowerCase()]));
+  return [p.contactName, p.contactPhone, p.contactEmail].filter((value) => value && !known.has(value.trim().toLowerCase())).join(' · ');
 }
 
 /**
@@ -470,23 +482,63 @@ async function reviewDialog(partner, onChanged) {
 }
 
 /**
- * @param {Partner} p
- * @param {{ manage: boolean, settle: boolean, showMerchant: boolean }} options
+ * Bills of one partner (unpaid, waiting, paid, voided) with voucher codes, then its payments.
+ * @param {Partner} partner
  */
-function partnerCard(p, { manage, settle, showMerchant }) {
+function historyDialog(partner) {
+  const base = `/api/v1/partners/${encodeURIComponent(partner.id)}`;
+  const dialog = openDialog(
+    `
+    <h2 class="h5 mb-3 pe-4">${esc(t('historyDialogTitle', { name: partner.name }))}</h2>
+    <h3 class="card-title">${esc(t('historyBills'))}</h3>
+    ${historyBlock('ph')}
+    <h3 class="card-title mt-4">${esc(t('historyPayments'))}</h3>
+    <ul class="payout-list" id="ph-payouts"></ul>`,
+    { wide: true },
+  );
+  mountHistory(dialog, 'ph', {
+    url: `${base}/history`,
+    withCode: true,
+    onFirstPage: (data) => {
+      if (!data.payouts) return;
+      /** @type {HTMLElement} */ (dialog.querySelector('#ph-payouts')).innerHTML = data.payouts.length
+        ? data.payouts.map(payoutItem).join('')
+        : `<li class="small text-muted">${esc(t('historyNoPayments'))}</li>`;
+    },
+  });
+  dialog.querySelector('#ph-payouts')?.addEventListener('click', (event) => {
+    const id = /** @type {HTMLElement} */ (event.target).closest('[data-payout]')?.getAttribute('data-payout');
+    if (id) openPayout(`${base}/payouts/${encodeURIComponent(id)}`, true).catch((error) => showMessage(errorText(error), 'error', 'ph-message'));
+  });
+}
+
+/**
+ * @param {Partner} p
+ * @param {{ manage: boolean, settle: boolean, history: boolean, showMerchant: boolean }} options
+ */
+function partnerCard(p, { manage, settle, history, showMerchant }) {
   const rule = p.rule
-    ? `<span class="fw-semibold">${esc(t('ruleShort', ruleTerms(p.rule)))}</span>
-       <span class="text-muted"> · ${esc(t('ruleVersion', { version: p.rule.version }))}</span>
-       ${isFixedRule(p.rule) ? '' : `<span class="d-block text-muted">${esc(t('rulePercentNote'))}</span>`}`
+    ? `<p class="partner-terms small">
+         <span class="fw-semibold">${esc(t('ruleShort', ruleTerms(p.rule)))}</span>
+         <span class="pill pill-sm" title="${esc(t('ruleVersion', { version: p.rule.version }))}">v${p.rule.version}</span>
+       </p>
+       ${isFixedRule(p.rule) ? '' : `<p class="small text-muted mb-0">${esc(t('rulePercentNote'))}</p>`}`
     : '';
   const accounts = p.accounts.length
     ? p.accounts
-        .map((a) => `<span class="d-block">${esc(a.displayName)} <span class="text-muted">· ${esc(a.email)} · ${esc(t(`status_${a.status}`))}</span></span>`)
+        .map(
+          (a) => `
+        <div class="partner-account">
+          <span class="partner-account-name">${esc(a.displayName)}</span>
+          <span class="pill pill-sm pill-${esc(a.status.toLowerCase())}">${esc(t(`status_${a.status}`))}</span>
+          <span class="partner-account-email text-muted" title="${esc(a.email)}">${esc(a.email)}</span>
+        </div>`,
+        )
         .join('')
     : `<span class="text-muted">${esc(t('noAccount'))}</span>`;
-  const contact = [p.contactName, p.contactPhone, p.contactEmail].filter(Boolean).join(' · ');
+  const contact = extraContact(p);
   const qrButton = p.qr
-    ? `<button type="button" class="btn btn-sm btn-outline-primary" data-action="qr" data-id="${esc(p.id)}">${icon('qr')}<span>${esc(t('partnerQr'))}</span></button>`
+    ? `<button type="button" class="btn btn-sm btn-outline-secondary" data-action="qr" data-id="${esc(p.id)}">${icon('qr')}<span>${esc(t('partnerQr'))}</span></button>`
     : '';
   const actions =
     manage && p.status !== 'ENDED'
@@ -503,7 +555,7 @@ function partnerCard(p, { manage, settle, showMerchant }) {
         ? `<div class="partner-actions">${qrButton}</div>`
         : '';
   return `
-    <article class="partner-card${p.status === 'ENDED' ? ' is-ended' : ''}">
+    <article class="partner-card${p.status === 'ENDED' ? ' is-ended' : ''}" id="partner-${esc(p.id)}">
       <header class="partner-head">
         <div>
           <h3 class="partner-name">${esc(p.name)}</h3>
@@ -513,11 +565,11 @@ function partnerCard(p, { manage, settle, showMerchant }) {
         </div>
         <span class="pill pill-${esc(p.status.toLowerCase())}">${esc(t(`status_${p.status}`))}</span>
       </header>
-      ${rule ? `<p class="small mb-1">${rule}</p>` : ''}
-      ${p.stats ? partnerStatsLine(p, settle) : ''}
-      ${contact ? `<p class="small text-muted mb-1">${esc(contact)}</p>` : ''}
-      ${p.endReason ? `<p class="small text-muted mb-1">${esc(t('endPartner'))}: ${esc(p.endReason)}</p>` : ''}
-      <div class="small partner-accounts"><span class="text-muted d-block">${esc(t('partnerAccounts'))}</span>${accounts}</div>
+      ${rule}
+      ${p.stats ? partnerStatsLine(p, { settle, history }) : ''}
+      ${contact ? `<p class="small text-muted mb-0">${esc(contact)}</p>` : ''}
+      ${p.endReason ? `<p class="small text-muted mb-0">${esc(t('endPartner'))}: ${esc(p.endReason)}</p>` : ''}
+      <div class="small partner-accounts"><span class="text-muted d-block mb-1">${esc(t('partnerAccounts'))}</span>${accounts}</div>
       ${actions}
     </article>`;
 }
@@ -527,14 +579,24 @@ export function mountPartners(app) {
   const profile = /** @type {import('../api.js').Profile} */ (app.state.profile);
   const manage = profile.permissions.includes('partner.manage');
   const settle = profile.permissions.includes('commission.settle');
+  const history = profile.permissions.includes('commission.list');
   const showMerchant = !profile.activeRole?.tenantId;
   /** @type {Partner[]} */
   let partners = [];
 
   const renderRows = () => {
     $('#partner-rows').innerHTML = partners.length
-      ? partners.map((p) => partnerCard(p, { manage, settle, showMerchant })).join('')
+      ? partners.map((p) => partnerCard(p, { manage, settle, history, showMerchant })).join('')
       : `<p class="text-muted mb-0">${esc(t('noPartners'))}</p>`;
+  };
+
+  /** From the Overview work list: /console/partners?partner=<id> brings that card into view. */
+  const showTarget = () => {
+    const id = new URLSearchParams(location.search).get('partner');
+    const card = id ? document.getElementById(`partner-${id}`) : null;
+    if (!card) return;
+    card.classList.add('is-target');
+    card.scrollIntoView({ block: 'center' });
   };
 
   /** @param {boolean} open */
@@ -555,6 +617,7 @@ export function mountPartners(app) {
       partners = (await api('GET', '/api/v1/partners')).partners;
       renderRows();
       if (firstLoad && manage && !partners.length) $('#partner-create-card').hidden = false;
+      if (firstLoad) showTarget();
       firstLoad = false;
     } catch (error) {
       showMessage(errorText(error), 'error', 'partner-message');
@@ -625,6 +688,30 @@ export function mountPartners(app) {
       return;
     }
 
+    if (action === 'history') {
+      historyDialog(partner);
+      return;
+    }
+
+    if (action === 'pay') {
+      const amount = formatVnd(partner.stats?.commissionOpen ?? '0');
+      formDialog({
+        title: t('markPaidTitle', { name: partner.name }),
+        body: `
+          <p class="small">${esc(t('markPaidConfirm', { name: partner.name, amount }))}</p>
+          <label for="d-pay-note" class="form-label small">${optionalLabel(t('markPaidNote'))}</label>
+          <textarea id="d-pay-note" name="note" class="form-control" rows="2" maxlength="300"></textarea>
+          <p class="small text-muted mt-1 mb-0">${esc(t('markPaidNoteHint'))}</p>`,
+        submit: t('markPaid'),
+        onSubmit: async (form) => {
+          const { payout } = await api('POST', `${path}/payouts`, { note: formValues(form).note });
+          showMessage(t('markPaidDone', { name: partner.name, amount: formatVnd(payout.amount) }), 'success', 'partner-message');
+          await load();
+        },
+      });
+      return;
+    }
+
     if (action === 'qr') {
       qrDialog(partner, {
         manage,
@@ -686,12 +773,7 @@ export function mountPartners(app) {
     }
 
     try {
-      if (action === 'pay') {
-        const amount = formatVnd(partner.stats?.commissionOpen ?? '0');
-        if (!confirm(t('markPaidConfirm', { name: partner.name, amount }))) return;
-        const { payout } = await api('POST', `${path}/payouts`, {});
-        showMessage(t('markPaidDone', { name: partner.name, amount: formatVnd(payout.amount) }), 'success', 'partner-message');
-      } else if (action === 'pause') {
+      if (action === 'pause') {
         if (!confirm(t('partnerPauseConfirm', { name: partner.name }))) return;
         await api('POST', `${path}/status`, { status: 'PAUSED' });
       } else if (action === 'resume') {
