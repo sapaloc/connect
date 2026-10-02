@@ -47,11 +47,14 @@ export function shortLink(link) {
   return token.length > 12 ? `${bare.slice(0, cut)}${token.slice(0, 4)}…${token.slice(-4)}` : bare;
 }
 
-/** @param {Pick<Voucher, 'discountType' | 'discountValue'>} voucher */
-export function discountText(voucher) {
+/**
+ * @param {Pick<Voucher, 'discountType' | 'discountValue'>} voucher
+ * @param {'vi' | 'en'} [lang]
+ */
+export function discountText(voucher, lang) {
   return voucher.discountType === 'PERCENT'
-    ? t('percentOff', { value: ratePercent(voucher.discountValue) })
-    : t('amountOff', { amount: formatVnd(voucher.discountValue) });
+    ? t('percentOff', { value: ratePercent(voucher.discountValue) }, lang)
+    : t('amountOff', { amount: formatVnd(voucher.discountValue, lang) }, lang);
 }
 
 /**
@@ -137,6 +140,15 @@ function fit(ctx, text, maxWidth) {
   return `${cut}…`;
 }
 
+/**
+ * DM Sans for share images, Vietnamese letters included: that subset is only fetched when page text
+ * needs it, which an English interface never does.
+ */
+async function loadImageFonts() {
+  await document.fonts?.ready;
+  await Promise.all([500, 600, 700].map((weight) => document.fonts?.load(`${weight} 16px "DM Sans"`, 'ƯĐÃỚỆểậợ')));
+}
+
 /** Card colours from the `main` design tokens (--sw-card, --sw-ink, --sw-acc, --sw-ink2). */
 const CARD = '#FBF7EE';
 const INK = '#1F2823';
@@ -208,7 +220,7 @@ export async function voucherImage(voucher) {
   canvas.width = W;
   canvas.height = H;
   const ctx = /** @type {CanvasRenderingContext2D} */ (canvas.getContext('2d'));
-  await document.fonts?.ready;
+  await loadImageFonts();
   const font = (/** @type {number} */ size, weight = 700) => `${weight} ${size}px "DM Sans", system-ui, sans-serif`;
 
   ctx.fillStyle = CARD;
@@ -246,7 +258,8 @@ export async function voucherImage(voucher) {
  */
 
 /**
- * A 1080x1350 PNG the partner prints or posts: merchant, discount, QR, "introduced by".
+ * A 1080x1350 PNG the partner prints or posts: merchant, discount, QR, "introduced by". Always English
+ * first with Vietnamese under it, whatever the interface language: guests read English, staff Vietnamese.
  * @param {PartnerQr} qr
  * @returns {Promise<Blob>}
  */
@@ -257,36 +270,44 @@ export async function partnerQrImage(qr) {
   canvas.width = W;
   canvas.height = H;
   const ctx = /** @type {CanvasRenderingContext2D} */ (canvas.getContext('2d'));
-  await document.fonts?.ready;
+  await loadImageFonts();
   const font = (/** @type {number} */ size, weight = 700) => `${weight} ${size}px "DM Sans", system-ui, sans-serif`;
+  const both = (/** @type {string} */ key, params = {}) => `${t(key, params, 'en')} · ${t(key, params, 'vi')}`;
 
+  ctx.font = font(30, 500);
+  const introduced = both('introducedBy', { name: qr.partnerName });
   ctx.fillStyle = CARD;
   ctx.fillRect(0, 0, W, H);
   await drawHeader(ctx, {
     width: W,
-    eyebrow: t('referralOffer'),
+    eyebrow: both('referralOffer'),
     merchantName: qr.merchantName,
-    sub: t('introducedBy', { name: qr.partnerName }),
+    sub: ctx.measureText(introduced).width <= W - 120 ? introduced : t('introducedBy', { name: qr.partnerName }, 'en'),
     brand: qr.brand,
   });
 
   if (qr.discount) {
     ctx.fillStyle = ACCENT;
-    ctx.font = font(96);
-    ctx.fillText(fit(ctx, discountText(qr.discount), W - 120), W / 2, 430);
+    ctx.font = font(88);
+    ctx.fillText(fit(ctx, discountText(qr.discount, 'en'), W - 120), W / 2, 405);
+    ctx.font = font(40, 600);
+    ctx.fillText(fit(ctx, discountText(qr.discount, 'vi'), W - 120), W / 2, 462);
   }
 
-  const image = /** @type {HTMLImageElement} */ (await loadImage(await referralQrDataUrl(qr.token, 560)));
+  const image = /** @type {HTMLImageElement} */ (await loadImage(await referralQrDataUrl(qr.token, 500)));
   ctx.fillStyle = '#FFFFFF';
-  ctx.fillRect(W / 2 - 310, 490, 620, 620);
-  ctx.drawImage(image, W / 2 - 280, 520, 560, 560);
+  ctx.fillRect(W / 2 - 270, 500, 540, 540);
+  ctx.drawImage(image, W / 2 - 250, 520, 500, 500);
 
   ctx.fillStyle = INK;
   ctx.font = font(44);
-  ctx.fillText(fit(ctx, t('scanToGetVoucher'), W - 120), W / 2, 1200);
-  ctx.font = font(30, 500);
+  ctx.fillText(fit(ctx, t('scanToGetVoucher', {}, 'en'), W - 120), W / 2, 1108);
+  ctx.font = font(36, 600);
+  ctx.fillText(fit(ctx, t('scanToGetVoucher', {}, 'vi'), W - 120), W / 2, 1158);
+  ctx.font = font(26, 500);
   ctx.fillStyle = INK_SOFT;
-  ctx.fillText(fit(ctx, t('referralTerms', { days: 7 }), W - 120), W / 2, 1260);
+  ctx.fillText(fit(ctx, t('referralTerms', { days: 7 }, 'en'), W - 120), W / 2, 1214);
+  ctx.fillText(fit(ctx, t('referralTerms', { days: 7 }, 'vi'), W - 120), W / 2, 1252);
   drawWordmark(ctx, W / 2, 1318);
 
   return new Promise((resolve, reject) => canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error('toBlob failed'))), 'image/png'));
