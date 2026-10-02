@@ -3,6 +3,7 @@ import { $, busy, esc, formValues } from '../dom.js';
 import { errorText, formatDate, formatDateTime, getLang, t } from '../i18n.js';
 import { prepareLogo } from '../image.js';
 import { messageSlot, showLink, showMessage } from './common.js';
+import { openDialog } from './history.js';
 
 /** @typedef {import('../main.js').App} App */
 /**
@@ -10,7 +11,12 @@ import { messageSlot, showLink, showMessage } from './common.js';
  *   id: string, name: string, slug: string | null, status: 'ACTIVE' | 'PAUSED',
  *   contactEmail: string | null, contactPhone: string | null, address: string | null,
  *   createdAt: string, admins: number, members: number, brand: import('../voucher-ui.js').Brand | null,
+ *   awaitingFirstSignIn: Array<{ userId: string, email: string, expiresAt: string | null }>,
  * }} Merchant
+ * @typedef {{
+ *   id: string, name: string, slug: string, contactEmail: string | null, contactPhone: string | null, address: string | null,
+ *   admin: { email: string, displayName: string, preferredLanguage: 'en' | 'vi' }, createdAt: string,
+ * }} Application
  */
 
 /** @param {string} id */
@@ -27,6 +33,14 @@ const optionalLabel = (label) => `${esc(label)} <span class="text-muted">(${esc(
 
 export function merchantsPanel() {
   return `
+    <section class="card-sw" id="applications" aria-labelledby="applications-title">
+      <h2 class="card-title d-flex align-items-center gap-2" id="applications-title">
+        <span>${esc(t('applicationsTitle'))}</span>
+        <span class="count-badge" id="applications-count" hidden></span>
+      </h2>
+      <div id="application-list" class="application-list"></div>
+      ${messageSlot('application-message')}
+    </section>
     <section class="card-sw">
       <h2 class="card-title">${esc(t('merchantCreateTitle'))}</h2>
       <p class="text-muted small mb-3">${esc(t('merchantCreateSubtitle'))}</p>
@@ -133,10 +147,190 @@ function showInvitation(message, invitation, name, boxId, slotId) {
   }
 }
 
+/**
+ * Sign-in email, temporary password (shown once, with a copy button) and its expiry.
+ * @param {HTMLDialogElement} dialog
+ * @param {{ title: string, intro: string, email: string, temporaryPassword: string, expiresAt: string }} content
+ */
+function showCredentials(dialog, { title, intro, email, temporaryPassword, expiresAt }) {
+  const inner = /** @type {HTMLElement} */ (dialog.querySelector('.vdialog-inner'));
+  inner.innerHTML = `
+    <button type="button" class="btn-close vdialog-close" data-close aria-label="${esc(t('close'))}"></button>
+    <h2 class="h5 mb-2 pe-4">${esc(title)}</h2>
+    <p class="small mb-3">${esc(intro)}</p>
+    <dl class="credentials mb-3">
+      <dt>${esc(t('signInEmail'))}</dt>
+      <dd class="text-break">${esc(email)}</dd>
+      <dt>${esc(t('temporaryPassword'))}</dt>
+      <dd>
+        <div class="input-group">
+          <input class="form-control temp-password" readonly value="${esc(temporaryPassword)}" aria-label="${esc(t('temporaryPassword'))}" />
+          <button type="button" class="btn btn-outline-secondary" data-copy-password>${esc(t('copy'))}</button>
+        </div>
+      </dd>
+      <dt>${esc(t('expires'))}</dt>
+      <dd>${esc(formatDateTime(expiresAt))}</dd>
+    </dl>
+    <p class="small text-muted mb-3">${esc(t('temporaryPasswordOnce'))}</p>
+    <button type="button" class="btn btn-primary w-100" data-close>${esc(t('done'))}</button>`;
+  const copy = /** @type {HTMLButtonElement} */ (inner.querySelector('[data-copy-password]'));
+  copy.addEventListener('click', async () => {
+    await navigator.clipboard.writeText(temporaryPassword);
+    copy.textContent = t('copied');
+  });
+}
+
 /** @param {App} _app */
 export function mountMerchants(_app) {
   /** @type {Merchant[]} */
   let merchants = [];
+  /** @type {Application[]} */
+  let applications = [];
+
+  const renderApplications = () => {
+    const count = $('#applications-count');
+    count.hidden = applications.length === 0;
+    count.textContent = String(applications.length);
+    $('#application-list').innerHTML = applications.length
+      ? applications
+          .map(
+            (a) => `
+        <article class="application" data-application="${esc(a.id)}">
+          <div class="application-main">
+            <h3 class="h6 mb-1">${esc(a.name)}</h3>
+            <p class="small text-muted mb-1 text-break">${esc([a.contactPhone, a.contactEmail, a.address].filter(Boolean).join(' · ') || a.slug)}</p>
+            <p class="small mb-1 text-break">${esc(t('applicationAdmin', { name: a.admin.displayName, email: a.admin.email, lang: a.admin.preferredLanguage.toUpperCase() }))}</p>
+            <p class="small text-muted mb-0">${esc(t('applicationSubmitted', { date: formatDateTime(a.createdAt) }))}</p>
+          </div>
+          <div class="application-actions">
+            <button type="button" class="btn btn-sm btn-primary" data-approve="${esc(a.id)}">${esc(t('approve'))}</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary" data-reject="${esc(a.id)}">${esc(t('reject'))}</button>
+          </div>
+        </article>`,
+          )
+          .join('')
+      : `<p class="text-muted small mb-0">${esc(t('applicationsEmpty'))}</p>`;
+  };
+
+  const loadApplications = async () => {
+    try {
+      applications = (await api('GET', '/api/v1/merchant-applications?status=PENDING')).applications;
+      renderApplications();
+    } catch (error) {
+      showMessage(errorText(error), 'error', 'application-message');
+    }
+  };
+
+  /** @param {Application} a */
+  const approve = (a) => {
+    const dialog = openDialog(`
+      <form id="approve-form" novalidate>
+        <h2 class="h5 mb-2 pe-4">${esc(t('approveTitle', { name: a.name }))}</h2>
+        <p class="small mb-3">${esc(t('approveIntro', { email: a.admin.email }))}</p>
+        <div class="mb-3">
+          <label for="ap-name" class="form-label small">${esc(t('merchantName'))}</label>
+          <input id="ap-name" name="name" class="form-control" maxlength="120" value="${esc(a.name)}" required />
+        </div>
+        <div class="mb-3">
+          <label for="ap-slug" class="form-label small">${esc(t('merchantSlug'))}</label>
+          <input id="ap-slug" name="slug" class="form-control" maxlength="48" value="${esc(a.slug)}" autocapitalize="off" spellcheck="false" required />
+          <div class="form-text">${esc(t('merchantSlugHint'))}</div>
+        </div>
+        ${messageSlot('approve-message')}
+        <div class="d-flex gap-2 mt-3">
+          <button type="button" class="btn btn-outline-secondary flex-fill" data-close>${esc(t('cancel'))}</button>
+          <button type="submit" class="btn btn-primary flex-fill">${esc(t('approve'))}</button>
+        </div>
+      </form>`);
+    const form = /** @type {HTMLFormElement} */ (dialog.querySelector('form'));
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      busy(form, async () => {
+        const values = formValues(form);
+        try {
+          const result = await api('POST', `/api/v1/merchant-applications/${encodeURIComponent(a.id)}/approve`, {
+            name: values.name.trim(),
+            slug: values.slug.trim(),
+          });
+          showCredentials(dialog, {
+            title: t('approvedTitle', { name: result.merchant.name }),
+            intro: t('approvedIntro', { name: a.admin.displayName }),
+            email: result.admin.email,
+            temporaryPassword: result.temporaryPassword,
+            expiresAt: result.expiresAt,
+          });
+          showMessage(t('merchantCreated', { name: result.merchant.name }), 'success', 'application-message');
+          await Promise.all([loadApplications(), load()]);
+        } catch (error) {
+          showMessage(errorText(error), 'error', 'approve-message');
+        }
+      });
+    });
+    /** @type {HTMLInputElement} */ (form.querySelector('#ap-name')).focus();
+  };
+
+  /** @param {Application} a */
+  const reject = (a) => {
+    const dialog = openDialog(`
+      <form id="reject-form" novalidate>
+        <h2 class="h5 mb-2 pe-4">${esc(t('rejectTitle', { name: a.name }))}</h2>
+        <label for="rj-reason" class="form-label small">${esc(t('rejectReason'))}</label>
+        <textarea id="rj-reason" name="reason" class="form-control" rows="3" maxlength="500" required></textarea>
+        <div class="form-text">${esc(t('rejectHint'))}</div>
+        ${messageSlot('reject-message')}
+        <div class="d-flex gap-2 mt-3">
+          <button type="button" class="btn btn-outline-secondary flex-fill" data-close>${esc(t('cancel'))}</button>
+          <button type="submit" class="btn btn-danger flex-fill">${esc(t('reject'))}</button>
+        </div>
+      </form>`);
+    const form = /** @type {HTMLFormElement} */ (dialog.querySelector('form'));
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const reason = formValues(form).reason.trim();
+      if (!reason) {
+        showMessage(t('rejectReasonRequired'), 'error', 'reject-message');
+        return;
+      }
+      busy(form, async () => {
+        try {
+          const result = await api('POST', `/api/v1/merchant-applications/${encodeURIComponent(a.id)}/reject`, { reason });
+          dialog.close();
+          showMessage(t('applicationRejected', { name: a.name, reason: result.application.rejectReason }), 'success', 'application-message');
+          await loadApplications();
+        } catch (error) {
+          showMessage(errorText(error), 'error', 'reject-message');
+        }
+      });
+    });
+    /** @type {HTMLTextAreaElement} */ (form.querySelector('textarea')).focus();
+  };
+
+  $('#application-list').addEventListener('click', (event) => {
+    const button = /** @type {HTMLElement} */ (event.target).closest('button');
+    const a = applications.find((item) => item.id === (button?.getAttribute('data-approve') ?? button?.getAttribute('data-reject')));
+    if (!button || !a) return;
+    if (button.hasAttribute('data-approve')) approve(a);
+    else reject(a);
+  });
+
+  /** @param {string} userId @param {string} email */
+  const reissue = async (userId, email) => {
+    if (!confirm(t('newTemporaryPasswordConfirm', { email }))) return;
+    try {
+      const result = await api('POST', `/api/v1/users/${encodeURIComponent(userId)}/temporary-password`);
+      const dialog = openDialog('');
+      showCredentials(dialog, {
+        title: t('newTemporaryPasswordTitle'),
+        intro: t('newTemporaryPasswordIntro'),
+        email: result.admin.email,
+        temporaryPassword: result.temporaryPassword,
+        expiresAt: result.expiresAt,
+      });
+      await load();
+    } catch (error) {
+      showMessage(errorText(error), 'error', 'merchant-message');
+    }
+  };
 
   const renderRows = () => {
     $('#merchant-rows').innerHTML = merchants.length
@@ -148,6 +342,15 @@ export function mountMerchants(_app) {
             ${m.brand?.logoUrl ? `<img class="merchant-logo" src="${esc(m.brand.logoUrl)}" alt="" />` : ''}
             <span class="d-block fw-semibold">${esc(m.name)}</span>
             <span class="d-block small text-muted text-break">${esc([m.contactPhone, m.contactEmail].filter(Boolean).join(' · ') || m.slug)}</span>
+            ${m.awaitingFirstSignIn
+              .map(
+                (admin) => `
+            <span class="awaiting d-block small mt-1 text-break">
+              ${esc(t('awaitingFirstSignIn', { email: admin.email, date: admin.expiresAt ? formatDateTime(admin.expiresAt) : '–' }))}
+              <button type="button" class="btn btn-link btn-sm p-0 align-baseline" data-temp="${esc(admin.userId)}" data-email="${esc(admin.email)}">${esc(t('newTemporaryPassword'))}</button>
+            </span>`,
+              )
+              .join('')}
           </td>
           <td data-label="${esc(t('merchantPeople'))}">${esc(t('merchantAdminsCount', { admins: m.admins, members: m.members }))}</td>
           <td data-label="${esc(t('status'))}"><span class="pill pill-${esc(m.status.toLowerCase())}">${esc(t(`status_${m.status}`))}</span></td>
@@ -250,6 +453,11 @@ export function mountMerchants(_app) {
   $('#merchant-rows').addEventListener('click', async (event) => {
     const target = /** @type {HTMLElement} */ (event.target).closest('button');
     if (!target) return;
+    const tempFor = target.getAttribute('data-temp');
+    if (tempFor) {
+      reissue(tempFor, target.getAttribute('data-email') ?? '');
+      return;
+    }
     const logoId = target.getAttribute('data-logo');
     if (logoId) {
       logoFor = logoId;
@@ -277,4 +485,5 @@ export function mountMerchants(_app) {
   });
 
   load();
+  loadApplications();
 }

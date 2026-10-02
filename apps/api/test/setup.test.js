@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
 import { closeClient, getDb } from '../src/db/mongo.js';
-import { setup } from '../src/db/setup.js';
+import { SCHEMA_VERSION, setup } from '../src/db/setup.js';
 import { resetDatabase } from './helpers.js';
 
 before(resetDatabase);
@@ -27,5 +27,16 @@ describe('db:setup on an existing database', () => {
     });
     await setup(guarded);
     assert.ok(!commands.includes('collMod'), `unexpected commands: ${commands.join(', ')}`);
+  });
+
+  it('records schema v11 with the merchant_applications collection and its pending-unique indexes', async () => {
+    const db = await getDb();
+    assert.equal(SCHEMA_VERSION, 11);
+    assert.equal(await db.collection('schema_versions').countDocuments({ _id: 11 }), 1);
+    const indexes = await db.collection('merchant_applications').indexes();
+    const byName = Object.fromEntries(indexes.map((index) => [index.name, index]));
+    assert.deepEqual(byName.pending_email_uq?.partialFilterExpression, { status: 'PENDING' });
+    assert.equal(byName.pending_email_uq?.unique, true);
+    assert.equal(byName.pending_slug_uq?.unique, true);
   });
 });

@@ -24,19 +24,19 @@ export function backLink({ href, label }) {
 }
 
 /**
- * Centered card used by every signed-out page.
- * @param {{ title: string, subtitle?: string, body: string, back?: { href: string, label: string } }} content
+ * Centered card used by every signed-out page. `wide` (sign in + register) brings its own headings.
+ * @param {{ title?: string, subtitle?: string, body: string, back?: { href: string, label: string }, wide?: boolean }} content
  */
-export function authLayout({ title, subtitle = '', body, back }) {
+export function authLayout({ title = '', subtitle = '', body, back, wide = false }) {
   return `
     <main class="auth-shell">
-      <section class="auth-card">
+      <section class="auth-card${wide ? ' auth-card-wide' : ''}">
         <header class="d-flex justify-content-between align-items-center mb-4">
           <a href="/" data-nav class="brand text-decoration-none">SAPAWOO</a>
           ${langToggle()}
         </header>
         ${back ? backLink(back) : ''}
-        <h1 class="h4 mb-1">${esc(title)}</h1>
+        ${title ? `<h1 class="h4 mb-1">${esc(title)}</h1>` : ''}
         ${subtitle ? `<p class="text-muted mb-4">${esc(subtitle)}</p>` : ''}
         ${body}
       </section>

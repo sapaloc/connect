@@ -26,7 +26,7 @@ export default defineConfig({
   },
   projects: [
     { name: 'phone', use: { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2 } },
-    { name: 'desktop', testMatch: /layout\.spec\.js/, use: { viewport: { width: 1280, height: 800 } } },
+    { name: 'desktop', testMatch: /(layout|register)\.spec\.js/, use: { viewport: { width: 1280, height: 800 } } },
   ],
   webServer: [
     {

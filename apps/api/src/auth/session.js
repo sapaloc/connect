@@ -18,6 +18,7 @@ import { hashToken, newToken } from './tokens.js';
  *   partnerRelationshipId: string | null,
  *   affiliatedReferrerId: string | null,
  *   supportSession: boolean,
+ *   mustChangePassword: boolean,
  * }} Session
  *
  * @typedef {{
@@ -130,7 +131,7 @@ export async function loadSession(req) {
   const users = await collection('users');
   const user = await users.findOne(
     { _id: session.userId, status: 'ACTIVE' },
-    { projection: { email: 1, displayName: 1, preferredLanguage: 1, roles: 1 } },
+    { projection: { email: 1, displayName: 1, preferredLanguage: 1, roles: 1, mustChangePassword: 1 } },
   );
   if (!user) return null;
 
@@ -160,7 +161,19 @@ export async function loadSession(req) {
     partnerRelationshipId: assignment?.partnerRelationshipId ?? null,
     affiliatedReferrerId: assignment?.affiliatedReferrerId ?? null,
     supportSession: session.supportSession,
+    mustChangePassword: user.mustChangePassword === true,
   };
+}
+
+/**
+ * Revokes every other session of the user (e.g. after a password change), keeping `keepSessionId`.
+ * @param {string} userId
+ * @param {string} keepSessionId
+ * @param {TxOptions} [options]
+ */
+export async function revokeOtherSessions(userId, keepSessionId, options = {}) {
+  const sessions = await collection('sessions');
+  await sessions.updateMany({ userId, revokedAt: null, _id: { $ne: keepSessionId } }, { $set: { revokedAt: new Date() } }, options);
 }
 
 /**
