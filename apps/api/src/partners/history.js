@@ -202,7 +202,7 @@ async function payoutDetail(partner, rawId, { withCode }) {
  * The partner of the signed-in Partner admin / Referrer.
  * @param {import('../http/router.js').Context} ctx
  */
-async function myPartnerOf(ctx) {
+export async function myPartnerOf(ctx) {
   const session = /** @type {import('../auth/session.js').Session} */ (ctx.session);
   const partners = await collection('partners');
   const partner = session.partnerRelationshipId ? await partners.findOne({ _id: session.partnerRelationshipId, tenantId: session.tenantId }) : null;

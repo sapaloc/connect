@@ -13,6 +13,20 @@ export function sendJson(res, status, body, headers = {}) {
 }
 
 /**
+ * A CSV file the browser downloads.
+ * @param {import('node:http').ServerResponse} res
+ * @param {string} fileName ASCII only
+ * @param {string} body
+ */
+export function sendCsv(res, fileName, body) {
+  res.statusCode = 200;
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+  res.setHeader('Cache-Control', 'no-store');
+  res.end(body);
+}
+
+/**
  * @param {import('node:http').ServerResponse} res
  * @param {number} status
  * @param {string} code
