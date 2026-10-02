@@ -46,6 +46,7 @@ test.describe('register on a phone', () => {
     const context = await newContext(browser);
     const page = await context.newPage();
     await page.goto('/login');
+    await expect(page.getByRole('tablist')).toBeVisible();
     const signInTab = page.getByRole('tab', { name: 'Sign in' });
     const registerTab = page.getByRole('tab', { name: 'Register' });
     await expect(signInTab).toHaveAttribute('aria-selected', 'true');
@@ -170,24 +171,36 @@ test.describe('register on a phone', () => {
 test.describe('register on a desktop', () => {
   test.skip(({ isMobile }) => isMobile, 'desktop only');
 
-  test('Sign in and Register sit side by side, each half of the card', async ({ browser }) => {
+  test('Sign in and Register sit side by side from 768 px, each half of the card', async ({ browser }) => {
     const context = await newContext(browser);
     const page = await context.newPage();
-    for (const path of ['/login', '/register']) {
-      await page.goto(path);
-      await expect(page.getByRole('tablist')).toBeHidden();
-      const signInPane = await page.locator('#pane-signin').boundingBox();
-      const registerPane = await page.locator('#pane-register').boundingBox();
-      const panes = await page.locator('.auth-panes').boundingBox();
-      if (!signInPane || !registerPane || !panes) throw new Error('panes not visible');
-      expect(Math.abs(signInPane.y - registerPane.y)).toBeLessThanOrEqual(1);
-      expect(Math.abs(signInPane.width - registerPane.width)).toBeLessThanOrEqual(1);
-      expect(registerPane.x).toBeGreaterThan(signInPane.x + signInPane.width);
-      expect(signInPane.width / panes.width).toBeGreaterThan(0.4);
-      expect(signInPane.width / panes.width).toBeLessThanOrEqual(0.5);
+    for (const viewport of [
+      { width: 768, height: 1024 },
+      { width: 1280, height: 800 },
+    ]) {
+      await page.setViewportSize(viewport);
+      for (const path of ['/login', '/register']) {
+        await page.goto(path);
+        await expect(page.getByRole('tablist'), `${viewport.width} ${path}`).toBeHidden();
+        await expect(page.locator('#sign-in')).toBeVisible();
+        await expect(page.locator('#register')).toBeVisible();
+        const signInPane = await page.locator('#pane-signin').boundingBox();
+        const registerPane = await page.locator('#pane-register').boundingBox();
+        const panes = await page.locator('.auth-panes').boundingBox();
+        const email = await page.locator('#email').boundingBox();
+        const businessName = await page.locator('#r-name').boundingBox();
+        if (!signInPane || !registerPane || !panes || !email || !businessName) throw new Error('panes not visible');
+        expect(Math.abs(signInPane.y - registerPane.y)).toBeLessThanOrEqual(1);
+        expect(Math.abs(signInPane.width - registerPane.width)).toBeLessThanOrEqual(1);
+        expect(registerPane.x).toBeGreaterThan(signInPane.x + signInPane.width);
+        expect(signInPane.width / panes.width).toBeGreaterThan(0.4);
+        expect(signInPane.width / panes.width).toBeLessThanOrEqual(0.5);
+        expect(email.width, `${viewport.width} sign-in input`).toBeGreaterThanOrEqual(300);
+        expect(businessName.width, `${viewport.width} register input`).toBeGreaterThanOrEqual(300);
+        const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+        expect(overflow, `${viewport.width} no horizontal scroll`).toBeLessThanOrEqual(0);
+      }
     }
-    await expect(page.locator('#sign-in')).toBeVisible();
-    await expect(page.locator('#register')).toBeVisible();
     await context.close();
   });
 });

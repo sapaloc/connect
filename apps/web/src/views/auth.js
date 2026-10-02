@@ -59,11 +59,11 @@ function registerPane() {
         <input id="r-name" name="name" class="form-control" maxlength="120" autocomplete="organization" required />
       </div>
       <div class="row g-3 mb-3">
-        <div class="col-12 col-sm-6">
+        <div class="col-12 col-sm-6 col-md-12 col-lg-6">
           <label for="r-phone" class="form-label">${optionalLabel(t('contactPhone'))}</label>
           <input id="r-phone" name="contactPhone" type="tel" class="form-control" maxlength="32" autocomplete="tel" />
         </div>
-        <div class="col-12 col-sm-6">
+        <div class="col-12 col-sm-6 col-md-12 col-lg-6">
           <label for="r-contact-email" class="form-label">${optionalLabel(t('contactEmail'))}</label>
           <input id="r-contact-email" name="contactEmail" type="email" class="form-control" maxlength="254" />
         </div>
@@ -121,7 +121,7 @@ function registerProblem(values) {
 }
 
 /**
- * Sign in and Register side by side from 992 px; tabs below that. `/register` opens the Register tab.
+ * Sign in and Register side by side from 768 px; tabs below that. `/register` opens the Register tab.
  * @param {App} app
  * @param {'signin' | 'register'} initial
  */
