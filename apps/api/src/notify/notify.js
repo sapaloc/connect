@@ -5,7 +5,8 @@ import { renderEmail } from './templates.js';
 
 /**
  * @typedef {'APPLICATION_RECEIVED' | 'APPLICATION_NEW_FOR_ADMINS' | 'APPLICATION_APPROVED' | 'APPLICATION_REJECTED'
- *   | 'TEMPORARY_PASSWORD_REISSUED'} NotifyType
+ *   | 'TEMPORARY_PASSWORD_REISSUED' | 'PARTNER_APPLICATION_RECEIVED' | 'PARTNER_APPLICATION_NEW_FOR_ADMINS'
+ *   | 'PARTNER_APPLICATION_APPROVED' | 'PARTNER_APPLICATION_REJECTED'} NotifyType
  * @typedef {{ email: string, language?: 'en' | 'vi' }} Recipient
  * @typedef {{ to: Recipient[] } & import('./templates.js').EmailData} NotifyPayload
  * @typedef {Omit<import('../audit/audit.js').AuditInput, 'eventType'>} AuditContext

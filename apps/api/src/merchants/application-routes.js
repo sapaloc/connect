@@ -1,33 +1,36 @@
 import { MERCHANT_SLUG_PATTERN, merchantSlug, ROLES } from '#domain';
 import { randomUUID } from 'node:crypto';
+import {
+  applicationPending,
+  assertEmailFree,
+  assertTermsAccepted,
+  closeApplication,
+  insertTemporaryAccount,
+  isDuplicateKey,
+  isHoneypotFilled,
+  limitApplicationsByEmail,
+  limitApplicationsByIp,
+  listStatus,
+  parseReason,
+  pendingApplication,
+  platformAdminRecipients,
+  RECEIVED,
+  temporaryCredentials,
+  UUID_PATTERN,
+} from '../applications/shared.js';
 import { actorOf, recordAudit } from '../audit/audit.js';
 import { authed } from '../auth/guard.js';
-import { hashPassword } from '../auth/password.js';
-import { consume } from '../auth/rate-limit.js';
 import { revokeUserSessions } from '../auth/session.js';
-import { newTemporaryPassword } from '../auth/temporary-password.js';
-import { RATE_LIMITS, TEMP_PASSWORD_TTL_MS } from '../config/security.js';
+import { TEMP_PASSWORD_TTL_MS } from '../config/security.js';
 import { newRoleAssignment } from '../db/bootstrap.js';
 import { collection } from '../db/mongo.js';
 import { withTransaction } from '../db/tx.js';
 import { parsePerson } from '../foundation/user-routes.js';
 import { HttpError } from '../http/errors.js';
-import { clientIp, publicOrigin, readJson, stringField } from '../http/request.js';
+import { publicOrigin, readJson, stringField } from '../http/request.js';
 import { sendJson } from '../http/respond.js';
 import { notify } from '../notify/notify.js';
 import { insertMerchant, merchantView, parseMerchantFields } from './merchant-routes.js';
-
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const STATUSES = ['PENDING', 'APPROVED', 'REJECTED'];
-const REASON_MAX = 500;
-const RECEIVED = { ok: true, status: 'PENDING' };
-
-/** @param {any} error */
-const isDuplicateKey = (error) => error?.code === 11000;
-
-const emailHasAccount = () => new HttpError(409, 'EMAIL_HAS_ACCOUNT', 'This email already has an account');
-const applicationPending = () => new HttpError(409, 'APPLICATION_PENDING', 'An application with this email or business is already waiting for review');
-const notFound = () => new HttpError(404, 'APPLICATION_NOT_FOUND', 'Application not found');
 
 /** @param {import('../http/router.js').Context} ctx */
 function sessionOf(ctx) {
@@ -71,32 +74,17 @@ function parseApplicant(value) {
 }
 
 /**
- * Active Platform admins, for the "new application" notice, each in their own language.
- * @returns {Promise<import('../notify/notify.js').Recipient[]>}
- */
-async function platformAdminRecipients() {
-  const users = await collection('users');
-  const rows = await users
-    .find(
-      { status: 'ACTIVE', roles: { $elemMatch: { role: ROLES.PLATFORM_ADMIN, status: 'ACTIVE' } } },
-      { projection: { email: 1, preferredLanguage: 1 } },
-    )
-    .toArray();
-  return rows.map((user) => ({ email: user.email, language: user.preferredLanguage === 'vi' ? 'vi' : 'en' }));
-}
-
-/**
- * Refuses names, links and emails that are taken; the unique indexes catch a race between two submits.
+ * Refuses names and links that are taken, then emails with an account or a pending application.
  * @param {{ name: string, slug: string, email: string }} input
- * @param {import('mongodb').ClientSession} [tx]
  */
-async function assertAvailable({ name, slug, email }, tx) {
+async function assertAvailable({ name, slug, email }) {
   const tenants = await collection('tenants');
-  if (await tenants.countDocuments({ $or: [{ name }, { slug }] }, { session: tx, limit: 1 })) {
+  if (await tenants.countDocuments({ $or: [{ name }, { slug }] }, { limit: 1 })) {
     throw new HttpError(409, 'MERCHANT_EXISTS', 'A merchant with this name or slug already exists');
   }
-  const users = await collection('users');
-  if (await users.countDocuments({ email }, { session: tx, limit: 1 })) throw emailHasAccount();
+  await assertEmailFree(email);
+  const applications = await collection('merchantApplications');
+  if (await applications.countDocuments({ status: 'PENDING', slug }, { limit: 1 })) throw applicationPending();
 }
 
 /**
@@ -104,24 +92,17 @@ async function assertAvailable({ name, slug, email }, tx) {
  * @type {import('../http/router.js').Handler}
  */
 async function submitApplication(req, res, ctx) {
-  await consume(`merchant-apply:ip:${clientIp(req)}`, RATE_LIMITS.merchantApplicationIp);
+  await limitApplicationsByIp(req);
   const body = await readJson(req);
-  if (body.website !== undefined && body.website !== '') {
+  if (isHoneypotFilled(body)) {
     sendJson(res, 202, RECEIVED);
     return;
   }
   const fields = parseMerchantFields({ ...body, slug: undefined });
   const admin = parseApplicant(body.admin);
-  if (body.acceptTerms !== true) {
-    throw new HttpError(422, 'TERMS_NOT_ACCEPTED', 'The terms must be accepted', { details: { field: 'acceptTerms' } });
-  }
-  await consume(`merchant-apply:email:${admin.email}`, RATE_LIMITS.merchantApplicationEmail);
-
+  assertTermsAccepted(body);
+  await limitApplicationsByEmail(admin.email);
   await assertAvailable({ name: fields.name, slug: fields.slug, email: admin.email });
-  const applications = await collection('merchantApplications');
-  if (await applications.countDocuments({ status: 'PENDING', $or: [{ 'admin.email': admin.email }, { slug: fields.slug }] }, { limit: 1 })) {
-    throw applicationPending();
-  }
 
   const now = new Date();
   const application = {
@@ -140,6 +121,7 @@ async function submitApplication(req, res, ctx) {
   };
   try {
     await withTransaction(async (tx) => {
+      const applications = await collection('merchantApplications');
       await applications.insertOne(application, { session: tx });
       await recordAudit(
         {
@@ -176,40 +158,12 @@ async function submitApplication(req, res, ctx) {
 
 /** @type {import('../http/router.js').Handler} */
 async function listApplications(req, res) {
-  const status = new URL(req.url ?? '/', 'http://localhost').searchParams.get('status') || 'PENDING';
-  if (!STATUSES.includes(status)) throw new HttpError(422, 'VALIDATION', 'status is invalid', { details: { field: 'status' } });
+  const status = listStatus(req);
   const applications = await collection('merchantApplications');
   const rows = await applications
     .find({ status }, { sort: { createdAt: status === 'PENDING' ? 1 : -1 }, limit: 200 })
     .toArray();
   sendJson(res, 200, { applications: rows.map(applicationView) });
-}
-
-/**
- * @param {import('../http/router.js').Context} ctx
- * @param {import('mongodb').ClientSession} tx
- */
-async function pendingApplication(ctx, tx) {
-  const id = ctx.params.id.toLowerCase();
-  if (!UUID_PATTERN.test(id)) throw notFound();
-  const applications = await collection('merchantApplications');
-  const application = await applications.findOne({ _id: id }, { session: tx });
-  if (!application) throw notFound();
-  if (application.status !== 'PENDING') {
-    throw new HttpError(409, 'APPLICATION_NOT_PENDING', 'This application was already reviewed');
-  }
-  return application;
-}
-
-/** @param {import('mongodb').ClientSession} tx @param {string} id @param {Record<string, unknown>} set */
-async function closeApplication(tx, id, set) {
-  const applications = await collection('merchantApplications');
-  const { modifiedCount } = await applications.updateOne(
-    { _id: id, status: 'PENDING' },
-    { $set: { ...set, updatedAt: new Date() } },
-    { session: tx },
-  );
-  if (modifiedCount !== 1) throw new HttpError(409, 'APPLICATION_NOT_PENDING', 'This application was already reviewed');
 }
 
 /**
@@ -225,11 +179,10 @@ async function approveApplication(req, res, ctx) {
   if (slugOverride && !MERCHANT_SLUG_PATTERN.test(slugOverride)) {
     throw new HttpError(422, 'VALIDATION', 'slug is invalid', { details: { field: 'slug' } });
   }
-  const temporaryPassword = newTemporaryPassword();
-  const passwordHash = await hashPassword(temporaryPassword);
+  const { temporaryPassword, passwordHash } = await temporaryCredentials();
 
   const result = await withTransaction(async (tx) => {
-    const application = await pendingApplication(ctx, tx);
+    const application = await pendingApplication('merchantApplications', ctx.params.id, tx);
     const fields = parseMerchantFields({
       name: nameOverride || application.name,
       slug: slugOverride || (nameOverride ? merchantSlug(nameOverride) : application.slug),
@@ -238,36 +191,18 @@ async function approveApplication(req, res, ctx) {
       address: application.address,
     });
     const { email, displayName, preferredLanguage } = application.admin;
-    const users = await collection('users');
-    if (await users.countDocuments({ email }, { session: tx, limit: 1 })) throw emailHasAccount();
-
     const tenant = await insertMerchant(ctx, fields, tx);
-    const now = new Date();
-    const expiresAt = new Date(now.getTime() + TEMP_PASSWORD_TTL_MS);
-    const userId = randomUUID();
-    try {
-      await users.insertOne(
-        {
-          _id: userId,
-          email,
-          displayName,
-          status: 'ACTIVE',
-          preferredLanguage,
-          passwordHash,
-          passwordChangedAt: now,
-          mustChangePassword: true,
-          tempPasswordExpiresAt: expiresAt,
-          roles: [newRoleAssignment({ role: ROLES.TENANT_ADMIN, tenantId: tenant._id, createdBy: session.userId })],
-          createdAt: now,
-          updatedAt: now,
-        },
-        { session: tx },
-      );
-    } catch (error) {
-      if (isDuplicateKey(error)) throw emailHasAccount();
-      throw error;
-    }
-    await closeApplication(tx, application._id, {
+    const { userId, expiresAt, now } = await insertTemporaryAccount(
+      {
+        email,
+        displayName,
+        preferredLanguage,
+        passwordHash,
+        roles: [newRoleAssignment({ role: ROLES.TENANT_ADMIN, tenantId: tenant._id, createdBy: session.userId })],
+      },
+      tx,
+    );
+    await closeApplication('merchantApplications', tx, application._id, {
       status: 'APPROVED',
       name: fields.name,
       slug: fields.slug,
@@ -319,13 +254,12 @@ async function approveApplication(req, res, ctx) {
 /** @type {import('../http/router.js').Handler} */
 async function rejectApplication(req, res, ctx) {
   const session = sessionOf(ctx);
-  const reason = stringField(await readJson(req), 'reason', { max: REASON_MAX }).trim();
-  if (!reason) throw new HttpError(422, 'VALIDATION', 'reason is required', { details: { field: 'reason' } });
+  const reason = parseReason(await readJson(req));
 
   const application = await withTransaction(async (tx) => {
-    const found = await pendingApplication(ctx, tx);
+    const found = await pendingApplication('merchantApplications', ctx.params.id, tx);
     const now = new Date();
-    await closeApplication(tx, found._id, { status: 'REJECTED', reviewedBy: session.userId, reviewedAt: now, rejectReason: reason });
+    await closeApplication('merchantApplications', tx, found._id, { status: 'REJECTED', reviewedBy: session.userId, reviewedAt: now, rejectReason: reason });
     await recordAudit(
       { ...actorOf(ctx), eventType: 'MERCHANT_APPLICATION_REJECTED', entityType: 'merchant_application', entityId: found._id, reason },
       { session: tx },
@@ -348,14 +282,14 @@ async function rejectApplication(req, res, ctx) {
 }
 
 /**
- * New temporary password for an account that has not replaced its temporary one yet; old sessions end.
+ * New temporary password for an account that has not replaced its temporary one yet (merchant admin
+ * or partner); old sessions end.
  * @type {import('../http/router.js').Handler}
  */
 async function reissueTemporaryPassword(req, res, ctx) {
   const userId = ctx.params.userId.toLowerCase();
   if (!UUID_PATTERN.test(userId)) throw new HttpError(404, 'USER_NOT_FOUND', 'User not found');
-  const temporaryPassword = newTemporaryPassword();
-  const passwordHash = await hashPassword(temporaryPassword);
+  const { temporaryPassword, passwordHash } = await temporaryCredentials();
 
   const result = await withTransaction(async (tx) => {
     const users = await collection('users');

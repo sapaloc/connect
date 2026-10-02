@@ -1,5 +1,6 @@
 import 'bootstrap/dist/css/bootstrap.min.css';
 import './styles.css';
+import { PARTNER_WELCOME_PATH } from '#domain';
 import { api, fetchProfile, SESSION_ENDED } from './api.js';
 import { errorText, getLang, setLang, t } from './i18n.js';
 import { canOpen, navItem } from './nav.js';
@@ -7,6 +8,7 @@ import { applyTheme, toggleTheme } from './theme.js';
 import { stopScanner } from './scanner.js';
 import { changePasswordView, forgotView, inviteView, loginView, registerView, resetView, selectRoleView } from './views/auth.js';
 import { homeView } from './views/home.js';
+import { partnerWelcomeView } from './views/partner-welcome.js';
 import { showMessage, togglePasswordReveal } from './views/common.js';
 import { brandView, consoleView, counterView, merchantsView, myView, partnersView, teamView, vouchersView } from './views/shell.js';
 import { referralPublicView } from './views/referral-public.js';
@@ -84,7 +86,7 @@ function route() {
   const referralPath = /^\/r\/([^/]+)$/.exec(path);
   if (referralPath) return referralPublicView(app, decodeURIComponent(referralPath[1]));
   if (PUBLIC_ROUTES[path]) {
-    if ((path === '/login' || path === '/register') && profile?.activeRole) {
+    if ((path === '/login' || path === '/register') && profile?.landing) {
       return app.navigate(/** @type {string} */ (profile.landing), { replace: true });
     }
     PUBLIC_ROUTES[path](app);
@@ -93,6 +95,10 @@ function route() {
   if (!profile) return app.navigate('/login', { replace: true });
   if (profile.mustChangePassword) {
     return path === '/change-password' ? changePasswordView(app) : app.navigate('/change-password', { replace: true });
+  }
+  // Approved partner without a merchant yet: no role, only the welcome page.
+  if (!profile.activeRole && profile.roles.length === 0 && profile.partnerProfile) {
+    return path === PARTNER_WELCOME_PATH ? partnerWelcomeView(app) : app.navigate(PARTNER_WELCOME_PATH, { replace: true });
   }
   if (path === '/select-role') return selectRoleView(app);
   if (!profile.activeRole) return app.navigate('/select-role', { replace: true });

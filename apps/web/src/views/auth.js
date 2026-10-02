@@ -1,3 +1,4 @@
+import { PARTNER_TYPES } from '#domain';
 import { api } from '../api.js';
 import { $, busy, esc, formValues } from '../dom.js';
 import { errorText, getLang, t } from '../i18n.js';
@@ -15,13 +16,20 @@ import { switchLabel } from './shell.js';
 /** @typedef {import('../main.js').App} App */
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-/** @type {Record<'signin' | 'register', string>} */
-const TAB_PATHS = { signin: '/login', register: '/register' };
+const KINDS = ['COMPANY', 'INDEPENDENT_INDIVIDUAL'];
+
+/** @typedef {'merchant' | 'partner'} RegisterType */
+
+/** Kept across re-renders (language switch) while the app stays open. @type {RegisterType} */
+let registerType = 'merchant';
+
+/** @param {RegisterType} type */
+const registerPath = (type) => (type === 'partner' ? '/register?type=partner' : '/register');
 
 /** @param {import('../api.js').Profile} profile */
 function afterSignIn(profile) {
   if (profile.mustChangePassword) return '/change-password';
-  return profile.activeRole ? /** @type {string} */ (profile.landing) : '/select-role';
+  return profile.landing ?? '/select-role';
 }
 
 /** @param {string} label */
@@ -48,7 +56,7 @@ function signInPane(app) {
     </form>`;
 }
 
-function registerPane() {
+function merchantForm() {
   const lang = getLang();
   return `
     <h2 class="h4 mb-1">${esc(t('registerTitle'))}</h2>
@@ -106,6 +114,93 @@ function registerPane() {
     </form>`;
 }
 
+/** @param {string} prefix */
+function languageSelect(prefix) {
+  const lang = getLang();
+  return `
+    <select id="${prefix}-lang" name="preferredLanguage" class="form-select" required>
+      <option value="en"${lang === 'en' ? ' selected' : ''}>EN</option>
+      <option value="vi"${lang === 'vi' ? ' selected' : ''}>VI</option>
+    </select>`;
+}
+
+function partnerForm() {
+  return `
+    <h2 class="h4 mb-1">${esc(t('partnerRegisterTitle'))}</h2>
+    <p class="text-muted mb-4">${esc(t('partnerRegisterSubtitle'))}</p>
+    <form id="partner-register" novalidate>
+      <fieldset class="mb-3">
+        <legend class="form-label fs-6 mb-2">${esc(t('partnerKindLegend'))}</legend>
+        <div class="btn-group w-100" role="radiogroup" aria-label="${esc(t('partnerKindLegend'))}">
+          ${KINDS.map(
+            (kind, index) => `
+            <input type="radio" class="btn-check" name="relationshipKind" id="pr-kind-${kind}" value="${kind}"${index === 0 ? ' checked' : ''} />
+            <label class="btn btn-outline-secondary" for="pr-kind-${kind}">${esc(t(`kind_${kind}`))}</label>`,
+          ).join('')}
+        </div>
+      </fieldset>
+      <div class="mb-3">
+        <label for="pr-type" class="form-label">${esc(t('partnerType'))}</label>
+        <select id="pr-type" name="partnerType" class="form-select">
+          ${PARTNER_TYPES.map((type) => `<option value="${type}">${esc(t(`ptype_${type}`))}</option>`).join('')}
+        </select>
+      </div>
+      <div class="mb-3">
+        <label for="pr-name" class="form-label" data-name-label>${esc(t('registerBusinessName'))}</label>
+        <input id="pr-name" name="name" class="form-control" maxlength="120" autocomplete="organization" required />
+      </div>
+      <div class="mb-3" data-contact>
+        <label for="pr-contact" class="form-label">${esc(t('contactName'))}</label>
+        <input id="pr-contact" name="contactName" class="form-control" maxlength="120" autocomplete="name" />
+      </div>
+      <div class="mb-3">
+        <label for="pr-phone" class="form-label">${optionalLabel(t('contactPhone'))}</label>
+        <input id="pr-phone" name="phone" type="tel" class="form-control" maxlength="32" autocomplete="tel" />
+      </div>
+      <div class="row g-3 mb-3">
+        <div class="col-8">
+          <label for="pr-email" class="form-label">${esc(t('email'))}</label>
+          <input id="pr-email" name="email" type="email" class="form-control" maxlength="254" autocomplete="email" required />
+        </div>
+        <div class="col-4">
+          <label for="pr-lang" class="form-label">${esc(t('language'))}</label>
+          ${languageSelect('pr')}
+        </div>
+      </div>
+      <div class="mb-3">
+        <label for="pr-note" class="form-label">${optionalLabel(t('partnerNote'))}</label>
+        <textarea id="pr-note" name="note" class="form-control" rows="2" maxlength="500" aria-describedby="pr-note-hint"></textarea>
+        <div class="form-text" id="pr-note-hint">${esc(t('partnerNoteHint'))}</div>
+      </div>
+      <div class="hp-field" aria-hidden="true">
+        <label for="pr-website">Website</label>
+        <input id="pr-website" name="website" tabindex="-1" autocomplete="off" />
+      </div>
+      <div class="form-check mb-4">
+        <input id="pr-terms" name="acceptTerms" type="checkbox" class="form-check-input" required />
+        <label for="pr-terms" class="form-check-label small">${esc(t('registerTerms'))}</label>
+      </div>
+      <button type="submit" class="btn btn-primary btn-lg w-100">${esc(t('registerSubmit'))}</button>
+      ${messageSlot('partner-register-message')}
+    </form>`;
+}
+
+/** Merchant | Partner switch above the two forms; only the chosen one shows. */
+function registerPane() {
+  return `
+    <div class="register-type" role="radiogroup" aria-label="${esc(t('registerAs'))}">
+      ${/** @type {RegisterType[]} */ (['merchant', 'partner'])
+        .map(
+          (type) => `
+        <input type="radio" class="btn-check" name="registerType" id="register-type-${type}" value="${type}"${type === registerType ? ' checked' : ''} />
+        <label for="register-type-${type}">${esc(t(type === 'partner' ? 'registerTypePartner' : 'registerTypeMerchant'))}</label>`,
+        )
+        .join('')}
+    </div>
+    <div class="register-form" data-register="merchant">${merchantForm()}</div>
+    <div class="register-form" data-register="partner">${partnerForm()}</div>`;
+}
+
 /**
  * First problem of the register form as [field id, message], or null.
  * @param {Record<string, string>} values
@@ -121,11 +216,45 @@ function registerProblem(values) {
 }
 
 /**
- * Sign in and Register side by side from 768 px; tabs below that. `/register` opens the Register tab.
+ * First problem of the partner form as [field id, message], or null.
+ * @param {Record<string, string>} values
+ * @returns {[string, string] | null}
+ */
+function partnerProblem(values) {
+  if (!values.name.trim()) return ['pr-name', t('partnerNameRequired')];
+  if (values.relationshipKind === 'COMPANY' && !values.contactName.trim()) return ['pr-contact', t('partnerContactRequired')];
+  if (!EMAIL_PATTERN.test(values.email.trim())) return ['pr-email', t('registerEmailInvalid')];
+  if (values.acceptTerms !== 'on') return ['pr-terms', t('registerTermsRequired')];
+  return null;
+}
+
+/**
+ * "We received your application" in place of the Register column.
+ * @param {(tab: 'signin' | 'register', options?: { focus?: boolean }) => void} select
+ * @param {string} body
+ * @param {string} email
+ */
+function showRegisterDone(select, body, email) {
+  const pane = $('#pane-register');
+  pane.innerHTML = `
+    <div class="register-done" tabindex="-1">
+      <h2 class="h4 mb-2">${esc(t('registerDoneTitle'))}</h2>
+      <p class="mb-2">${esc(body)}</p>
+      <p class="text-muted small mb-4">${esc(t('registerDoneNext', { email: email.trim().toLowerCase() }))}</p>
+      <button type="button" class="btn btn-outline-secondary w-100" data-goto-signin>${esc(t('backToSignIn'))}</button>
+    </div>`;
+  /** @type {HTMLElement} */ ($('.register-done', pane)).focus();
+  $('[data-goto-signin]', pane).addEventListener('click', () => select('signin', { focus: true }));
+}
+
+/**
+ * Sign in and Register side by side from 768 px; tabs below that. `/register` opens the Register tab,
+ * `/register?type=partner` its Partner form. On `/login` the Merchant | Partner switch keeps the address.
  * @param {App} app
  * @param {'signin' | 'register'} initial
  */
 function accessView(app, initial) {
+  if (initial === 'register') registerType = new URLSearchParams(location.search).get('type') === 'partner' ? 'partner' : 'merchant';
   app.root.innerHTML = authLayout({
     wide: true,
     back: { href: '/', label: t('backHome') },
@@ -152,9 +281,22 @@ function accessView(app, initial) {
       button.tabIndex = active ? 0 : -1;
       if (active && focus) button.focus();
     }
-    if (location.pathname !== TAB_PATHS[tab]) history.replaceState(null, '', TAB_PATHS[tab]);
+    const path = tab === 'signin' ? '/login' : registerPath(registerType);
+    if (location.pathname + location.search !== path) history.replaceState(null, '', path);
   };
   select(initial);
+
+  const registerPaneEl = /** @type {HTMLElement} */ ($('#pane-register'));
+  /** @param {RegisterType} type */
+  const showType = (type) => {
+    registerType = type;
+    registerPaneEl.dataset.type = type;
+    if (location.pathname === '/register') history.replaceState(null, '', registerPath(type));
+  };
+  showType(registerType);
+  registerPaneEl.querySelectorAll('input[name="registerType"]').forEach((radio) => {
+    radio.addEventListener('change', () => showType(/** @type {RegisterType} */ (/** @type {HTMLInputElement} */ (radio).value)));
+  });
   for (const button of tabs) {
     button.addEventListener('click', () => select(/** @type {'signin' | 'register'} */ (button.dataset.tab)));
     button.addEventListener('keydown', (event) => {
@@ -205,18 +347,52 @@ function accessView(app, initial) {
           acceptTerms: true,
           website: values.website ?? '',
         });
-        const pane = $('#pane-register');
-        pane.innerHTML = `
-          <div class="register-done" tabindex="-1">
-            <h2 class="h4 mb-2">${esc(t('registerDoneTitle'))}</h2>
-            <p class="mb-2">${esc(t('registerDoneBody', { name: values.name.trim() }))}</p>
-            <p class="text-muted small mb-4">${esc(t('registerDoneNext', { email: values.adminEmail.trim().toLowerCase() }))}</p>
-            <button type="button" class="btn btn-outline-secondary w-100" data-goto-signin>${esc(t('backToSignIn'))}</button>
-          </div>`;
-        /** @type {HTMLElement} */ ($('.register-done', pane)).focus();
-        $('[data-goto-signin]', pane).addEventListener('click', () => select('signin', { focus: true }));
+        showRegisterDone(select, t('registerDoneBody', { name: values.name.trim() }), values.adminEmail);
       } catch (error) {
         showMessage(errorText(error), 'error', 'register-message');
+      }
+    });
+  });
+
+  const partner = /** @type {HTMLFormElement} */ ($('#partner-register'));
+  const syncKind = () => {
+    const company = formValues(partner).relationshipKind !== 'INDEPENDENT_INDIVIDUAL';
+    $('[data-name-label]', partner).textContent = t(company ? 'registerBusinessName' : 'registerAdminName');
+    /** @type {HTMLInputElement} */ ($('#pr-name', partner)).autocomplete = company ? 'organization' : 'name';
+    /** @type {HTMLElement} */ ($('[data-contact]', partner)).hidden = !company;
+  };
+  syncKind();
+  partner.querySelectorAll('input[name="relationshipKind"]').forEach((radio) => radio.addEventListener('change', syncKind));
+  partner.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const values = formValues(partner);
+    partner.querySelectorAll('[aria-invalid]').forEach((field) => field.removeAttribute('aria-invalid'));
+    const problem = partnerProblem(values);
+    if (problem) {
+      const field = $(`#${problem[0]}`);
+      field.setAttribute('aria-invalid', 'true');
+      field.focus();
+      showMessage(problem[1], 'error', 'partner-register-message');
+      return;
+    }
+    const company = values.relationshipKind === 'COMPANY';
+    busy(partner, async () => {
+      try {
+        await api('POST', '/api/v1/partner-applications', {
+          relationshipKind: values.relationshipKind,
+          partnerType: values.partnerType,
+          name: values.name,
+          contactName: company ? values.contactName : '',
+          phone: values.phone,
+          email: values.email,
+          preferredLanguage: values.preferredLanguage,
+          note: values.note,
+          acceptTerms: true,
+          website: values.website ?? '',
+        });
+        showRegisterDone(select, t('partnerDoneBody', { name: values.name.trim() }), values.email);
+      } catch (error) {
+        showMessage(errorText(error), 'error', 'partner-register-message');
       }
     });
   });

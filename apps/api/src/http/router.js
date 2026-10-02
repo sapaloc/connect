@@ -5,9 +5,11 @@ import { userRoutes } from '../foundation/user-routes.js';
 import { applicationRoutes } from '../merchants/application-routes.js';
 import { dashboardRoutes } from '../merchants/dashboard.js';
 import { merchantRoutes } from '../merchants/merchant-routes.js';
+import { partnerApplicationRoutes } from '../partners/application-routes.js';
 import { historyRoutes } from '../partners/history.js';
 import { myRoutes } from '../partners/my-routes.js';
 import { partnerRoutes } from '../partners/partner-routes.js';
+import { partnerProfileRoutes } from '../partners/profile-routes.js';
 import { reportRoutes } from '../partners/report.js';
 import { reviewRoutes } from '../partners/review-routes.js';
 import { referralRoutes } from '../referrals/referral-routes.js';
@@ -27,6 +29,8 @@ const definitions = [
   ...userRoutes,
   ...merchantRoutes,
   ...applicationRoutes,
+  ...partnerApplicationRoutes,
+  ...partnerProfileRoutes,
   ...partnerRoutes,
   ...referralRoutes,
   ...myRoutes,

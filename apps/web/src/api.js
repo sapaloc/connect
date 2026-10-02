@@ -85,6 +85,7 @@ export async function apiFile(path) {
  *   permissions: string[],
  *   landing: string | null,
  *   needsRoleSelection: boolean,
+ *   partnerProfile: boolean,
  * }} Profile
  */
 
