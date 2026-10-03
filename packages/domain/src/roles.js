@@ -48,16 +48,19 @@ export function roleSide(role) {
 /**
  * Why `role` in `tenantId` cannot join the person's active assignments, or null.
  * A person stays on one side: platform, merchant team or partner. A partner may work with many
- * merchants; a merchant team member holds one role per merchant.
- * @param {{ role: string, tenantId: string | null }[]} assignments active assignments only
- * @param {{ role: string, tenantId: string | null }} next
- * @returns {'ROLE_SIDE_CONFLICT' | 'ROLE_ALREADY_IN_MERCHANT' | null}
+ * merchants, through one partner record each; a merchant team member holds one role per merchant.
+ * @param {{ role: string, tenantId: string | null, partnerRelationshipId?: string | null }[]} assignments active assignments only
+ * @param {{ role: string, tenantId: string | null, partnerRelationshipId?: string | null }} next
+ * @returns {'ROLE_SIDE_CONFLICT' | 'ROLE_ALREADY_IN_MERCHANT' | 'PARTNER_ALREADY_IN_MERCHANT' | null}
  */
-export function roleConflict(assignments, { role, tenantId }) {
+export function roleConflict(assignments, { role, tenantId, partnerRelationshipId = null }) {
   const side = roleSide(role);
   for (const assignment of assignments) {
     if (roleSide(assignment.role) !== side) return 'ROLE_SIDE_CONFLICT';
     if (side === 'MERCHANT' && assignment.tenantId === tenantId && assignment.role !== role) return 'ROLE_ALREADY_IN_MERCHANT';
+    if (side === 'PARTNER' && assignment.tenantId === tenantId && (assignment.partnerRelationshipId ?? null) !== partnerRelationshipId) {
+      return 'PARTNER_ALREADY_IN_MERCHANT';
+    }
   }
   return null;
 }

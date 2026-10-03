@@ -14,14 +14,15 @@ import { randomUUID } from 'node:crypto';
 import { actorOf, recordAudit } from '../audit/audit.js';
 import { authed } from '../auth/guard.js';
 import { fromDecimal128, toDecimal128 } from '../db/decimal.js';
-import { newCommercialRule, newReferralMedium, partnerNameKey, RATE_FIELDS } from '../db/bootstrap.js';
+import { newCommercialRule, newPartnerProfile, newReferralMedium, partnerNameKey, RATE_FIELDS } from '../db/bootstrap.js';
 import { collection } from '../db/mongo.js';
 import { withTransaction } from '../db/tx.js';
 import { inviteMember, parsePerson } from '../foundation/user-routes.js';
 import { HttpError } from '../http/errors.js';
-import { readJson, stringField } from '../http/request.js';
+import { publicOrigin, readJson, stringField } from '../http/request.js';
 import { sendJson } from '../http/respond.js';
 import { merchantBrands, merchantNames, scopeFilter, UUID_PATTERN } from '../merchants/scope.js';
+import { notify } from '../notify/notify.js';
 import { MERCHANT_PAYS, partnerStats, payoutView } from './stats.js';
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -222,14 +223,17 @@ async function listPartners(req, res, ctx) {
 }
 
 /**
- * Creates an ACTIVE partner with its first commercial rule and QR and, when `account` is given, invites
- * its MyConnect account in the same transaction.
- * @type {import('../http/router.js').Handler}
+ * @typedef {{ name: string, relationshipKind: string, partnerType: string, contactName: string | null,
+ *   contactPhone: string | null, contactEmail: string | null, note: string | null,
+ *   rule: import('#domain').FixedRule | import('#domain').CommercialRule }} PartnerFields
  */
-async function createPartner(req, res, ctx) {
-  const session = sessionOf(ctx);
-  const tenantId = /** @type {string} */ (session.tenantId);
-  const body = await readJson(req);
+
+/**
+ * Name, kind, type, contact, note and first terms of a new partner (the "add partner" form).
+ * @param {Record<string, unknown>} body
+ * @returns {PartnerFields}
+ */
+export function parsePartnerFields(body) {
   const name = stringField(body, 'name', { max: 120 }).trim();
   if (!name) throw new HttpError(422, 'VALIDATION', 'name is required', { details: { field: 'name' } });
   const relationshipKind = stringField(body, 'relationshipKind', { max: 32 });
@@ -238,22 +242,43 @@ async function createPartner(req, res, ctx) {
   }
   const partnerType = stringField(body, 'partnerType', { max: 32 });
   if (!PARTNER_TYPES.includes(partnerType)) throw new HttpError(422, 'VALIDATION', 'partnerType is invalid', { details: { field: 'partnerType' } });
-  const contact = parseContact(body);
-  const rule = parseRule(relationshipKind, body.rule);
-  const accountBody = body.account && typeof body.account === 'object' ? /** @type {Record<string, unknown>} */ (body.account) : null;
-  const account = accountBody ? parsePerson(accountBody) : null;
+  return {
+    name,
+    relationshipKind,
+    partnerType,
+    ...parseContact(body),
+    note: optionalText(body, 'note', 500),
+    rule: parseRule(relationshipKind, body.rule),
+  };
+}
 
+const partnerExists = () => new HttpError(409, 'PARTNER_EXISTS', 'A partner with this name already exists');
+
+/**
+ * Inserts an ACTIVE partner of the signed-in merchant with its first rule and QR inside `tx` and, when
+ * `account` is given, invites its MyConnect account (an active account just gets the partner role).
+ * @param {import('node:http').IncomingMessage} req
+ * @param {import('../http/router.js').Context} ctx
+ * @param {PartnerFields} fields
+ * @param {Omit<import('../foundation/user-routes.js').Invitee, 'role'> | null} account
+ * @param {import('mongodb').ClientSession} tx
+ */
+export async function insertPartner(req, ctx, { rule, ...fields }, account, tx) {
+  const session = sessionOf(ctx);
+  const tenantId = /** @type {string} */ (session.tenantId);
   const now = new Date();
   const partner = {
     _id: randomUUID(),
     tenantId,
-    name,
-    nameKey: partnerNameKey(name),
-    relationshipKind,
-    partnerType,
+    name: fields.name,
+    nameKey: partnerNameKey(fields.name),
+    relationshipKind: fields.relationshipKind,
+    partnerType: fields.partnerType,
     status: 'ACTIVE',
-    ...contact,
-    note: optionalText(body, 'note', 500),
+    contactName: fields.contactName,
+    contactPhone: fields.contactPhone,
+    contactEmail: fields.contactEmail,
+    note: fields.note,
     createdBy: session.userId,
     createdAt: now,
     updatedAt: now,
@@ -261,39 +286,100 @@ async function createPartner(req, res, ctx) {
     endedBy: null,
     endReason: null,
   };
+  const partners = await collection('partners');
   try {
-    const result = await withTransaction(async (tx) => {
-      const partners = await collection('partners');
-      await partners.insertOne(partner, { session: tx });
-      const commercialRules = await collection('commercialRules');
-      const ruleDoc = newCommercialRule(rule, { tenantId, partnerId: partner._id, version: 1, createdBy: session.userId, now });
-      await commercialRules.insertOne(ruleDoc, { session: tx });
-      const referralMedia = await collection('referralMedia');
-      await referralMedia.insertOne(newReferralMedium(partner, session.userId), { session: tx });
-      await recordAudit(
-        {
-          ...actorOf(ctx),
-          eventType: 'PARTNER_CREATED',
-          entityType: 'partner_relationship',
-          entityId: partner._id,
-          after: { name, relationshipKind, partnerType, rule: ruleTerms(rule) },
-        },
-        { session: tx },
-      );
-      const invitation = account
-        ? await inviteMember(
-            req,
-            ctx,
-            { ...account, role: partnerAccountRole(relationshipKind), tenantId, partnerRelationshipId: partner._id },
-            tx,
-          )
-        : null;
-      return { ruleDoc, invitation };
-    });
-    const extra = await related([partner]);
-    sendJson(res, 201, { partner: partnerView(partner, extra), invitation: result.invitation });
+    await partners.insertOne(partner, { session: tx });
   } catch (error) {
-    if (/** @type {any} */ (error)?.code === 11000) throw new HttpError(409, 'PARTNER_EXISTS', 'A partner with this name already exists');
+    if (/** @type {any} */ (error)?.code === 11000) throw partnerExists();
+    throw error;
+  }
+  const commercialRules = await collection('commercialRules');
+  await commercialRules.insertOne(newCommercialRule(rule, { tenantId, partnerId: partner._id, version: 1, createdBy: session.userId, now }), {
+    session: tx,
+  });
+  const referralMedia = await collection('referralMedia');
+  await referralMedia.insertOne(newReferralMedium(partner, session.userId), { session: tx });
+  await recordAudit(
+    {
+      ...actorOf(ctx),
+      eventType: 'PARTNER_CREATED',
+      entityType: 'partner_relationship',
+      entityId: partner._id,
+      after: { name: partner.name, relationshipKind: partner.relationshipKind, partnerType: partner.partnerType, rule: ruleTerms(rule) },
+    },
+    { session: tx },
+  );
+  const invitation = account
+    ? await inviteMember(req, ctx, { ...account, role: partnerAccountRole(partner.relationshipKind), tenantId, partnerRelationshipId: partner._id }, tx)
+    : null;
+  if (invitation) await ensurePartnerProfile(invitation.userId, partner, session.userId, tx);
+  return { partner, invitation };
+}
+
+/**
+ * Gives the account its partner profile, from this partner record, when it has none yet. An existing
+ * profile is the partner's own and is never overwritten.
+ * @param {string} userId
+ * @param {any} partner
+ * @param {string} createdBy
+ * @param {import('mongodb').ClientSession} tx
+ */
+async function ensurePartnerProfile(userId, partner, createdBy, tx) {
+  const profiles = await collection('partnerProfiles');
+  if (await profiles.countDocuments({ userId }, { session: tx, limit: 1 })) return;
+  const users = await collection('users');
+  const user = await users.findOne({ _id: userId }, { session: tx, projection: { email: 1, preferredLanguage: 1 } });
+  if (!user) return;
+  await profiles.insertOne(newPartnerProfile({ userId, email: user.email, preferredLanguage: user.preferredLanguage, partner, createdBy }), { session: tx });
+}
+
+/** @param {any} partner */
+export async function partnerWithRelated(partner) {
+  return partnerView(partner, await related([partner]));
+}
+
+/**
+ * Tells an account that already signs in (a partner of other merchants, or a free partner) that this
+ * merchant added it; it keeps its password.
+ * @param {import('node:http').IncomingMessage} req
+ * @param {import('../http/router.js').Context} ctx
+ * @param {any} partner
+ * @param {string} userId
+ */
+async function notifyAddedPartner(req, ctx, partner, userId) {
+  const users = await collection('users');
+  const user = await users.findOne({ _id: userId }, { projection: { email: 1, displayName: 1, preferredLanguage: 1 } });
+  if (!user) return false;
+  const names = await merchantNames([partner.tenantId]);
+  return notify(
+    'PARTNER_ADDED_BY_MERCHANT',
+    {
+      to: [{ email: user.email, language: user.preferredLanguage === 'vi' ? 'vi' : 'en' }],
+      name: partner.name,
+      displayName: user.displayName,
+      merchantName: names.get(partner.tenantId) ?? '',
+      origin: publicOrigin(req),
+    },
+    { ...actorOf(ctx), entityType: 'partner_relationship', entityId: partner._id },
+  );
+}
+
+/**
+ * Creates an ACTIVE partner with its first commercial rule and QR and, when `account` is given, invites
+ * its MyConnect account in the same transaction.
+ * @type {import('../http/router.js').Handler}
+ */
+async function createPartner(req, res, ctx) {
+  const body = await readJson(req);
+  const fields = parsePartnerFields(body);
+  const accountBody = body.account && typeof body.account === 'object' ? /** @type {Record<string, unknown>} */ (body.account) : null;
+  const account = accountBody ? parsePerson(accountBody) : null;
+  try {
+    const { partner, invitation } = await withTransaction((tx) => insertPartner(req, ctx, fields, account, tx));
+    const emailSent = invitation?.status === 'ACTIVE' ? await notifyAddedPartner(req, ctx, partner, invitation.userId) : false;
+    sendJson(res, 201, { partner: await partnerWithRelated(partner), invitation, emailSent });
+  } catch (error) {
+    if (/** @type {any} */ (error)?.code === 11000) throw partnerExists();
     throw error;
   }
 }

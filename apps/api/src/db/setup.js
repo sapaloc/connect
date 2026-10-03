@@ -1,7 +1,7 @@
-import { merchantSlug } from '#domain';
+import { merchantSlug, roleSide } from '#domain';
 import { pathToFileURL } from 'node:url';
 import { env, requireEnv } from '../config/env.js';
-import { newReferralMedium } from './bootstrap.js';
+import { newPartnerProfile, newReferralMedium } from './bootstrap.js';
 import { decimalField } from './decimal.js';
 import { closeClient, COLLECTIONS, getDb } from './mongo.js';
 
@@ -9,7 +9,7 @@ import { closeClient, COLLECTIONS, getDb } from './mongo.js';
  * Bump when a validator or index changes. Changes must keep old documents valid
  * (add optional fields; backfill in a script before making a field required).
  */
-export const SCHEMA_VERSION = 10;
+export const SCHEMA_VERSION = 13;
 
 const DAY_SECONDS = 24 * 60 * 60;
 const uuid = { bsonType: 'string', pattern: '^[0-9a-f-]{36}$' };
@@ -92,11 +92,12 @@ const DEFINITIONS = {
         createdAt: date,
       },
     },
-    // slug, contactEmail, contactPhone, address, vatRate, brandColor, logoAssetId are optional and not in the validator: changing
-    // an existing validator needs collMod, which the UAT database user may not run.
+    // slug, contactEmail, contactPhone, address, vatRate, brandColor, logoAssetId, acceptsNewPartners are optional and not in the
+    // validator: changing an existing validator needs collMod, which the UAT database user may not run.
     indexes: [
       { key: { name: 1 }, name: 'name_uq', unique: true },
       { key: { slug: 1 }, name: 'slug_uq', unique: true, partialFilterExpression: { slug: { $type: 'string' } } },
+      { key: { status: 1, name: 1 }, name: 'accepting_partners', partialFilterExpression: { acceptsNewPartners: true } },
     ],
   },
 
@@ -121,6 +122,7 @@ const DEFINITIONS = {
         { properties: { status: { enum: ['ACTIVE'] }, passwordHash: text }, required: ['passwordHash'] },
       ],
     },
+    // mustChangePassword and tempPasswordExpiresAt (temporary password) are optional and not in the validator (no collMod).
     indexes: [
       { key: { email: 1 }, name: 'email_uq', unique: true },
       { key: { 'roles._id': 1 }, name: 'role_assignment_id' },
@@ -537,11 +539,175 @@ const DEFINITIONS = {
     ],
   },
 
+  // A business asking to join from the sign-in page; a Platform admin approves (creates the merchant) or rejects.
+  [COLLECTIONS.merchantApplications]: {
+    schema: {
+      bsonType: 'object',
+      required: ['_id', 'status', 'name', 'slug', 'admin', 'termsAcceptedAt', 'createdAt', 'updatedAt'],
+      properties: {
+        _id: uuid,
+        status: { enum: ['PENDING', 'APPROVED', 'REJECTED'] },
+        name: text,
+        slug: text,
+        contactEmail: { bsonType: ['string', 'null'] },
+        contactPhone: { bsonType: ['string', 'null'] },
+        address: { bsonType: ['string', 'null'] },
+        admin: {
+          bsonType: 'object',
+          required: ['email', 'displayName', 'preferredLanguage'],
+          properties: {
+            email: { bsonType: 'string', pattern: '^[^A-Z]+$' },
+            displayName: text,
+            preferredLanguage: { enum: ['en', 'vi'] },
+          },
+        },
+        termsAcceptedAt: date,
+        createdAt: date,
+        updatedAt: date,
+        reviewedBy: nullableUuid,
+        reviewedAt: nullableDate,
+        rejectReason: { bsonType: ['string', 'null'] },
+        tenantId: nullableUuid,
+        userId: nullableUuid,
+      },
+    },
+    indexes: [
+      { key: { 'admin.email': 1 }, name: 'pending_email_uq', unique: true, partialFilterExpression: { status: 'PENDING' } },
+      { key: { slug: 1 }, name: 'pending_slug_uq', unique: true, partialFilterExpression: { status: 'PENDING' } },
+      { key: { status: 1, createdAt: 1 }, name: 'status_created' },
+    ],
+  },
+
+  // A hotel, restaurant, guide or driver asking to join from the sign-in page; approval creates the account and its partner profile.
+  [COLLECTIONS.partnerApplications]: {
+    schema: {
+      bsonType: 'object',
+      required: ['_id', 'status', 'relationshipKind', 'partnerType', 'name', 'email', 'preferredLanguage', 'termsAcceptedAt', 'createdAt', 'updatedAt'],
+      properties: {
+        _id: uuid,
+        status: { enum: ['PENDING', 'APPROVED', 'REJECTED'] },
+        relationshipKind: { enum: ['COMPANY', 'INDEPENDENT_INDIVIDUAL'] },
+        partnerType: { enum: ['HOTEL', 'RESTAURANT', 'TOUR_GUIDE', 'DRIVER', 'OTHER'] },
+        name: text,
+        contactName: { bsonType: ['string', 'null'] },
+        phone: { bsonType: ['string', 'null'] },
+        email: { bsonType: 'string', pattern: '^[^A-Z]+$' },
+        preferredLanguage: { enum: ['en', 'vi'] },
+        note: { bsonType: ['string', 'null'] },
+        termsAcceptedAt: date,
+        createdAt: date,
+        updatedAt: date,
+        reviewedBy: nullableUuid,
+        reviewedAt: nullableDate,
+        rejectReason: { bsonType: ['string', 'null'] },
+        userId: nullableUuid,
+        profileId: nullableUuid,
+      },
+    },
+    indexes: [
+      { key: { email: 1 }, name: 'pending_email_uq', unique: true, partialFilterExpression: { status: 'PENDING' } },
+      { key: { status: 1, createdAt: 1 }, name: 'status_created' },
+    ],
+  },
+
+  // The partner side of an account before (and after) it joins merchants; `partners` rows belong to one merchant each.
+  [COLLECTIONS.partnerProfiles]: {
+    schema: {
+      bsonType: 'object',
+      required: ['_id', 'userId', 'relationshipKind', 'partnerType', 'name', 'email', 'preferredLanguage', 'status', 'createdAt', 'updatedAt'],
+      properties: {
+        _id: uuid,
+        userId: uuid,
+        relationshipKind: { enum: ['COMPANY', 'INDEPENDENT_INDIVIDUAL'] },
+        partnerType: { enum: ['HOTEL', 'RESTAURANT', 'TOUR_GUIDE', 'DRIVER', 'OTHER'] },
+        name: text,
+        contactName: { bsonType: ['string', 'null'] },
+        phone: { bsonType: ['string', 'null'] },
+        email: { bsonType: 'string', pattern: '^[^A-Z]+$' },
+        preferredLanguage: { enum: ['en', 'vi'] },
+        note: { bsonType: ['string', 'null'] },
+        status: { enum: ['ACTIVE', 'PAUSED', 'ENDED'] },
+        applicationId: nullableUuid,
+        approvedBy: nullableUuid,
+        createdAt: date,
+        updatedAt: date,
+      },
+    },
+    indexes: [
+      { key: { userId: 1 }, name: 'user_uq', unique: true },
+      { key: { status: 1, partnerType: 1 }, name: 'status_type' },
+    ],
+  },
+
+  // A partner (with a partner profile) asking a merchant that accepts new partners to work together.
+  [COLLECTIONS.partnerJoinRequests]: {
+    schema: {
+      bsonType: 'object',
+      required: ['_id', 'tenantId', 'userId', 'profileId', 'status', 'createdAt', 'updatedAt'],
+      properties: {
+        _id: uuid,
+        tenantId: uuid,
+        userId: uuid,
+        profileId: uuid,
+        message: { bsonType: ['string', 'null'] },
+        status: { enum: ['PENDING', 'APPROVED', 'REJECTED', 'CANCELLED'] },
+        createdAt: date,
+        updatedAt: date,
+        reviewedBy: nullableUuid,
+        reviewedAt: nullableDate,
+        rejectReason: { bsonType: ['string', 'null'] },
+        cancelledAt: nullableDate,
+        partnerId: nullableUuid,
+      },
+    },
+    indexes: [
+      { key: { userId: 1, tenantId: 1 }, name: 'pending_user_tenant_uq', unique: true, partialFilterExpression: { status: 'PENDING' } },
+      { key: { tenantId: 1, status: 1, createdAt: 1 }, name: 'tenant_status_created' },
+      { key: { userId: 1, createdAt: -1 }, name: 'user_created' },
+    ],
+  },
+
   [COLLECTIONS.schemaVersions]: {
     schema: { bsonType: 'object', required: ['_id', 'appliedAt'], properties: { _id: { bsonType: 'int' }, appliedAt: date } },
     indexes: [],
   },
 };
+
+/**
+ * Every account holding an active partner role gets its own partner profile (#92), filled from its
+ * earliest partner record. Insert only: existing profiles are never changed. Returns how many were added.
+ * @param {import('mongodb').Db} db
+ */
+async function backfillPartnerProfiles(db) {
+  const profiles = db.collection(COLLECTIONS.partnerProfiles);
+  const partners = db.collection(COLLECTIONS.partners);
+  const withProfile = new Set(await profiles.distinct('userId'));
+  const holders = await db
+    .collection(COLLECTIONS.users)
+    .find(
+      { status: { $in: ['INVITED', 'ACTIVE'] }, roles: { $elemMatch: { role: { $in: ['PARTNER_ADMIN', 'REFERRER'] }, status: 'ACTIVE' } } },
+      { projection: { email: 1, preferredLanguage: 1, roles: 1 } },
+    )
+    .toArray();
+  let added = 0;
+  for (const user of holders) {
+    if (withProfile.has(user._id)) continue;
+    const partnerIds = user.roles
+      .filter((/** @type {any} */ assignment) => assignment.status === 'ACTIVE' && roleSide(assignment.role) === 'PARTNER' && assignment.partnerRelationshipId)
+      .map((/** @type {any} */ assignment) => assignment.partnerRelationshipId);
+    const [partner] = await partners.find({ _id: { $in: partnerIds } }).sort({ createdAt: 1, _id: 1 }).limit(1).toArray();
+    if (!partner) continue;
+    try {
+      await profiles.insertOne(
+        newPartnerProfile({ userId: user._id, email: user.email, preferredLanguage: user.preferredLanguage, partner, createdBy: partner.createdBy ?? null }),
+      );
+      added += 1;
+    } catch (error) {
+      if (/** @type {any} */ (error)?.code !== 11000) throw error;
+    }
+  }
+  return added;
+}
 
 /**
  * Fills fields added after documents were created. Idempotent.
@@ -563,11 +729,13 @@ async function backfill(db) {
     if (withQr.has(partner._id)) continue;
     await media.insertOne(newReferralMedium(partner, partner.createdBy));
   }
+  return { partnerProfilesBackfilled: await backfillPartnerProfiles(db) };
 }
 
 /**
  * Creates missing collections, applies validators and indexes. Safe to run on every deploy.
  * @param {import('mongodb').Db} db
+ * @returns {Promise<{ partnerProfilesBackfilled: number }>}
  */
 export async function setup(db) {
   const existing = new Map((await db.listCollections().toArray()).map((c) => [c.name, c.options?.validator]));
@@ -588,17 +756,19 @@ export async function setup(db) {
     }
     if (indexes.length) await db.collection(name).createIndexes(indexes);
   }
-  await backfill(db);
+  const filled = await backfill(db);
   await db
     .collection(COLLECTIONS.schemaVersions)
     .updateOne({ _id: SCHEMA_VERSION }, { $setOnInsert: { appliedAt: new Date() } }, { upsert: true });
+  return filled;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   requireEnv('mongodbUri');
   try {
-    await setup(await getDb());
+    const { partnerProfilesBackfilled } = await setup(await getDb());
     console.log(`db:setup: schema v${SCHEMA_VERSION} applied to database "${env.mongodbDb}"`);
+    console.log(`db:setup: partner profiles backfilled ${partnerProfilesBackfilled}`);
   } finally {
     await closeClient();
   }

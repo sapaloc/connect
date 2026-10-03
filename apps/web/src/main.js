@@ -1,14 +1,16 @@
 import 'bootstrap/dist/css/bootstrap.min.css';
 import './styles.css';
+import { PARTNER_WELCOME_PATH } from '#domain';
 import { api, fetchProfile, SESSION_ENDED } from './api.js';
 import { errorText, getLang, setLang, t } from './i18n.js';
-import { canOpen, navItem } from './nav.js';
+import { canOpen, FIND_MERCHANTS_PATH, navItem } from './nav.js';
 import { applyTheme, toggleTheme } from './theme.js';
 import { stopScanner } from './scanner.js';
-import { forgotView, inviteView, loginView, resetView, selectRoleView } from './views/auth.js';
+import { changePasswordView, forgotView, inviteView, loginView, registerView, resetView, selectRoleView } from './views/auth.js';
 import { homeView } from './views/home.js';
+import { partnerWelcomeView } from './views/partner-welcome.js';
 import { showMessage, togglePasswordReveal } from './views/common.js';
-import { brandView, consoleView, counterView, merchantsView, myView, partnersView, teamView, vouchersView } from './views/shell.js';
+import { brandView, consoleView, counterView, findMerchantsView, merchantsView, myView, partnersView, teamView, vouchersView } from './views/shell.js';
 import { referralPublicView } from './views/referral-public.js';
 import { voucherPublicView } from './views/voucher-public.js';
 
@@ -24,7 +26,14 @@ import { voucherPublicView } from './views/voucher-public.js';
  */
 
 /** @type {Record<string, (app: App) => void>} */
-const PUBLIC_ROUTES = { '/': homeView, '/login': loginView, '/forgot': forgotView, '/invite': inviteView, '/reset': resetView };
+const PUBLIC_ROUTES = {
+  '/': homeView,
+  '/login': loginView,
+  '/register': registerView,
+  '/forgot': forgotView,
+  '/invite': inviteView,
+  '/reset': resetView,
+};
 
 /** Signed-in pages; who may open each one is declared in nav.js. */
 /** @type {Record<string, (app: App) => void>} */
@@ -37,6 +46,7 @@ const PAGE_ROUTES = {
   '/console/team': teamView,
   '/counter': counterView,
   '/my': myView,
+  [FIND_MERCHANTS_PATH]: findMerchantsView,
 };
 
 /** @type {{ text: string, tone: 'error' | 'success' | 'info' } | null} */
@@ -77,11 +87,21 @@ function route() {
   const referralPath = /^\/r\/([^/]+)$/.exec(path);
   if (referralPath) return referralPublicView(app, decodeURIComponent(referralPath[1]));
   if (PUBLIC_ROUTES[path]) {
-    if (path === '/login' && profile?.activeRole) return app.navigate(/** @type {string} */ (profile.landing), { replace: true });
+    if ((path === '/login' || path === '/register') && profile?.landing) {
+      return app.navigate(/** @type {string} */ (profile.landing), { replace: true });
+    }
     PUBLIC_ROUTES[path](app);
     return loadHealth();
   }
   if (!profile) return app.navigate('/login', { replace: true });
+  if (profile.mustChangePassword) {
+    return path === '/change-password' ? changePasswordView(app) : app.navigate('/change-password', { replace: true });
+  }
+  // Approved partner without a merchant yet: no role, only the welcome page and Find merchants.
+  if (!profile.activeRole && profile.roles.length === 0 && profile.partnerProfile) {
+    if (path === FIND_MERCHANTS_PATH) return findMerchantsView(app);
+    return path === PARTNER_WELCOME_PATH ? partnerWelcomeView(app) : app.navigate(PARTNER_WELCOME_PATH, { replace: true });
+  }
   if (path === '/select-role') return selectRoleView(app);
   if (!profile.activeRole) return app.navigate('/select-role', { replace: true });
 

@@ -157,6 +157,46 @@ export function seedPartners(password) {
   });
 }
 
+/**
+ * Adds a missing partner profile for each sample partner account, so it can find merchants and ask to
+ * join them (#92). Existing profiles are left as they are. Returns the emails that got one.
+ */
+export function seedPartnerProfiles() {
+  return withTransaction(async (session) => {
+    const users = await collection('users');
+    const profiles = await collection('partnerProfiles');
+    /** @type {string[]} */
+    const created = [];
+    for (const sample of SEED_PARTNERS) {
+      const user = await users.findOne({ email: sample.account.email }, { session, projection: { preferredLanguage: 1 } });
+      if (!user || (await profiles.countDocuments({ userId: user._id }, { session, limit: 1 }))) continue;
+      const now = new Date();
+      await profiles.insertOne(
+        {
+          _id: randomUUID(),
+          userId: user._id,
+          relationshipKind: sample.relationshipKind,
+          partnerType: sample.partnerType,
+          name: sample.name,
+          contactName: sample.relationshipKind === RELATIONSHIP_KINDS.COMPANY ? sample.account.displayName : null,
+          phone: null,
+          email: sample.account.email,
+          preferredLanguage: user.preferredLanguage === 'vi' ? 'vi' : 'en',
+          note: null,
+          status: 'ACTIVE',
+          applicationId: null,
+          approvedBy: null,
+          createdAt: now,
+          updatedAt: now,
+        },
+        { session },
+      );
+      created.push(sample.account.email);
+    }
+    return created;
+  });
+}
+
 /** True once any seed account exists, so later runs never touch passwords or roles changed during testing. */
 export async function isSeeded() {
   const users = await collection('users');
@@ -178,6 +218,8 @@ export async function seedOnce() {
   }
   const created = await seedPartners(env.seedPassword);
   console.log(created.length ? `seed: partner side added: ${created.join(', ')}` : 'seed: partner side already exists');
+  const profiles = await seedPartnerProfiles();
+  console.log(profiles.length ? `seed: partner profiles added: ${profiles.join(', ')}` : 'seed: partner profiles already exist');
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

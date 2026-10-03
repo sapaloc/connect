@@ -152,7 +152,7 @@ export async function inviteMember(req, ctx, { email, displayName, role, preferr
   const conflict = user
     ? roleConflict(
         (user.roles ?? []).filter((/** @type {any} */ assignment) => assignment.status === 'ACTIVE'),
-        { role, tenantId },
+        { role, tenantId, partnerRelationshipId },
       )
     : null;
   if (conflict) throw new HttpError(409, conflict, 'This account already has a role that cannot be combined with this one');

@@ -25,6 +25,8 @@ export const SESSION_TOUCH_INTERVAL_MS = MINUTE;
 
 export const INVITATION_TTL_MS = 72 * HOUR;
 export const PASSWORD_RESET_TTL_MS = HOUR;
+/** A temporary password (approved merchant application) works until then; the admin can issue a new one. */
+export const TEMP_PASSWORD_TTL_MS = 7 * DAY;
 
 export const RATE_LIMITS = Object.freeze({
   loginAccount: { max: 5, windowMs: 15 * MINUTE },
@@ -32,6 +34,10 @@ export const RATE_LIMITS = Object.freeze({
   resetRequestEmail: { max: 3, windowMs: HOUR },
   resetRequestIp: { max: 10, windowMs: HOUR },
   tokenIp: { max: 10, windowMs: 15 * MINUTE },
+  passwordChangeUser: { max: 5, windowMs: 15 * MINUTE },
+  // Merchant and partner applications share these counters.
+  applicationIp: { max: 5, windowMs: HOUR },
+  applicationEmail: { max: 3, windowMs: DAY },
   publicVoucherIp: { max: 60, windowMs: 15 * MINUTE },
   publicReferralIp: { max: 60, windowMs: 15 * MINUTE },
   referralActivateIp: { max: 20, windowMs: 15 * MINUTE },

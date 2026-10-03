@@ -19,6 +19,10 @@ export const COLLECTIONS = Object.freeze({
   fileAssets: 'file_assets',
   redemptionConfirmations: 'redemption_confirmations',
   commissionReviews: 'commission_reviews',
+  merchantApplications: 'merchant_applications',
+  partnerApplications: 'partner_applications',
+  partnerProfiles: 'partner_profiles',
+  partnerJoinRequests: 'partner_join_requests',
   schemaVersions: 'schema_versions',
 });
 

@@ -1,4 +1,4 @@
-import { LANDING, passwordPolicyErrors, permissionsFor } from '#domain';
+import { LANDING, PARTNER_WELCOME_PATH, passwordPolicyErrors, permissionsFor } from '#domain';
 import { recordAudit } from '../audit/audit.js';
 import { authed } from '../auth/guard.js';
 import { hashPassword, verifyPassword } from '../auth/password.js';
@@ -8,6 +8,7 @@ import {
   clearSessionCookie,
   createSession,
   loadSession,
+  revokeOtherSessions,
   revokeSession,
   revokeUserSessions,
 } from '../auth/session.js';
@@ -18,14 +19,18 @@ import { withTransaction } from '../db/tx.js';
 import { HttpError } from '../http/errors.js';
 import { clientIp, readJson, stringField } from '../http/request.js';
 import { sendJson } from '../http/respond.js';
+import { hasActivePartnerProfile } from '../partners/profile-routes.js';
 
 /**
  * Payload for the web: who is signed in, which role is active, what it may do and where it lands.
- * @param {{ userId: string, email: string, displayName: string, preferredLanguage: string }} user
+ * `mustChangePassword`: signed in with a temporary password; nothing else works until it is changed.
+ * `partnerProfile`: an approved partner; without any role yet (no merchant) it lands on the partner welcome page.
+ * @param {{ userId: string, email: string, displayName: string, preferredLanguage: string, mustChangePassword?: boolean }} user
  * @param {import('../auth/session.js').RoleOption[]} roles
  * @param {string | null} roleAssignmentId
+ * @param {boolean} partnerProfile
  */
-function profile(user, roles, roleAssignmentId) {
+function profile(user, roles, roleAssignmentId, partnerProfile) {
   const active = roles.find((option) => option.roleAssignmentId === roleAssignmentId) ?? null;
   return {
     user: {
@@ -34,12 +39,23 @@ function profile(user, roles, roleAssignmentId) {
       displayName: user.displayName,
       preferredLanguage: user.preferredLanguage,
     },
+    mustChangePassword: user.mustChangePassword === true,
     activeRole: active,
     roles,
     permissions: permissionsFor(active?.role),
-    landing: active ? LANDING[active.role] : null,
+    landing: active ? LANDING[active.role] : roles.length === 0 && partnerProfile ? PARTNER_WELCOME_PATH : null,
     needsRoleSelection: !active && roles.length > 1,
+    partnerProfile,
   };
+}
+
+/**
+ * @param {Parameters<typeof profile>[0]} user
+ * @param {string | null} roleAssignmentId
+ */
+async function currentProfile(user, roleAssignmentId) {
+  const [roles, partnerProfile] = await Promise.all([activeRoles(user.userId), hasActivePartnerProfile(user.userId)]);
+  return profile(user, roles, roleAssignmentId, partnerProfile);
 }
 
 const invalidCredentials = () => new HttpError(401, 'INVALID_CREDENTIALS', 'Email or password is incorrect');
@@ -72,7 +88,17 @@ async function login(req, res, ctx) {
   const account = email
     ? await users.findOne(
         { email },
-        { projection: { email: 1, displayName: 1, preferredLanguage: 1, status: 1, passwordHash: 1 } },
+        {
+          projection: {
+            email: 1,
+            displayName: 1,
+            preferredLanguage: 1,
+            status: 1,
+            passwordHash: 1,
+            mustChangePassword: 1,
+            tempPasswordExpiresAt: 1,
+          },
+        },
       )
     : null;
   const passwordOk = await verifyPassword(password, account?.passwordHash);
@@ -89,8 +115,22 @@ async function login(req, res, ctx) {
     throw invalidCredentials();
   }
 
-  const roles = await activeRoles(account._id);
-  if (roles.length === 0) throw new HttpError(403, 'NO_ACTIVE_ROLE', 'This account has no active role');
+  const mustChangePassword = account.mustChangePassword === true;
+  if (mustChangePassword && !(account.tempPasswordExpiresAt > new Date())) {
+    await recordAudit({
+      eventType: 'SIGN_IN_FAILED',
+      entityType: 'user_account',
+      entityId: account._id,
+      after: { email, ip },
+      reason: 'TEMP_PASSWORD_EXPIRED',
+      correlationId: ctx.requestId,
+    });
+    throw new HttpError(401, 'TEMP_PASSWORD_EXPIRED', 'This temporary password has expired. Ask the platform admin for a new one.');
+  }
+
+  const [roles, partnerProfile] = await Promise.all([activeRoles(account._id), hasActivePartnerProfile(account._id)]);
+  // An approved partner who has joined no merchant yet signs in without a role.
+  if (roles.length === 0 && !partnerProfile) throw new HttpError(403, 'NO_ACTIVE_ROLE', 'This account has no active role');
 
   // One role: use it. Several: the user must choose; never pick the highest (C3).
   const chosen = roles.length === 1 ? roles[0] : null;
@@ -118,8 +158,56 @@ async function login(req, res, ctx) {
     email: account.email,
     displayName: account.displayName,
     preferredLanguage: account.preferredLanguage,
+    mustChangePassword,
   };
-  sendJson(res, 200, profile(user, roles, chosen?.roleAssignmentId ?? null), { 'Set-Cookie': cookie });
+  sendJson(res, 200, profile(user, roles, chosen?.roleAssignmentId ?? null, partnerProfile), { 'Set-Cookie': cookie });
+}
+
+/**
+ * Signed-in user replaces the current password (required after a temporary one); other sessions end.
+ * @type {import('../http/router.js').Handler}
+ */
+async function changePassword(req, res, ctx) {
+  const session = /** @type {import('../auth/session.js').Session} */ (ctx.session);
+  const body = await readJson(req);
+  const currentPassword = stringField(body, 'currentPassword', { max: 256 });
+  const newPassword = stringField(body, 'newPassword', { max: 256 });
+  await consume(`password-change:user:${session.userId}`, RATE_LIMITS.passwordChangeUser);
+
+  const users = await collection('users');
+  const account = await users.findOne({ _id: session.userId, status: 'ACTIVE' }, { projection: { passwordHash: 1 } });
+  if (!account || !(await verifyPassword(currentPassword, account.passwordHash))) {
+    throw new HttpError(422, 'CURRENT_PASSWORD_WRONG', 'The current password is incorrect', { details: { field: 'currentPassword' } });
+  }
+  assertPasswordPolicy(newPassword);
+  if (newPassword === currentPassword) {
+    throw new HttpError(422, 'PASSWORD_UNCHANGED', 'Choose a password different from the current one', { details: { field: 'newPassword' } });
+  }
+  const passwordHash = await hashPassword(newPassword);
+
+  await withTransaction(async (tx) => {
+    const now = new Date();
+    await users.updateOne(
+      { _id: session.userId },
+      { $set: { passwordHash, passwordChangedAt: now, updatedAt: now }, $unset: { mustChangePassword: '', tempPasswordExpiresAt: '' } },
+      { session: tx },
+    );
+    await revokeOtherSessions(session.userId, session.sessionId, { session: tx });
+    await recordAudit(
+      {
+        eventType: 'PASSWORD_CHANGED',
+        tenantId: session.tenantId,
+        actorUserId: session.userId,
+        actorRoleAssignmentId: session.roleAssignmentId,
+        entityType: 'user_account',
+        entityId: session.userId,
+        after: { temporaryReplaced: session.mustChangePassword },
+        correlationId: ctx.requestId,
+      },
+      { session: tx },
+    );
+  });
+  sendJson(res, 200, await currentProfile({ ...session, mustChangePassword: false }, session.roleAssignmentId));
 }
 
 /** @type {import('../http/router.js').Handler} */
@@ -140,23 +228,32 @@ async function logout(req, res, ctx) {
   sendJson(res, 200, { ok: true }, { 'Set-Cookie': clearSessionCookie() });
 }
 
-/** @type {import('../http/router.js').Handler} */
-async function me(_req, res, ctx) {
+/**
+ * A session without a role whose account now has exactly one (a partner just added by a merchant, or
+ * whose other roles ended) switches to it, as sign-in would.
+ * @type {import('../http/router.js').Handler}
+ */
+async function me(req, res, ctx) {
   const session = /** @type {import('../auth/session.js').Session} */ (ctx.session);
-  const roles = await activeRoles(session.userId);
-  sendJson(res, 200, profile(session, roles, session.roleAssignmentId));
+  if (!session.roleAssignmentId) {
+    const roles = await activeRoles(session.userId);
+    if (roles.length === 1) {
+      const cookie = await switchRole(req, ctx, session, roles[0]);
+      const partnerProfile = await hasActivePartnerProfile(session.userId);
+      return sendJson(res, 200, profile(session, roles, roles[0].roleAssignmentId, partnerProfile), { 'Set-Cookie': cookie });
+    }
+  }
+  sendJson(res, 200, await currentProfile(session, session.roleAssignmentId));
 }
 
-/** @type {import('../http/router.js').Handler} */
-async function selectRole(req, res, ctx) {
-  const session = /** @type {import('../auth/session.js').Session} */ (ctx.session);
-  const body = await readJson(req);
-  const roleAssignmentId = stringField(body, 'roleAssignmentId', { max: 64 });
-  const roles = await activeRoles(session.userId);
-  const chosen = roles.find((option) => option.roleAssignmentId === roleAssignmentId);
-  if (!chosen) throw new HttpError(403, 'ROLE_NOT_AVAILABLE', 'This role is not available');
-
-  // New session ID on every role change (§8.1).
+/**
+ * Replaces the session with one on `chosen`: a new session ID on every role change (§8.1).
+ * @param {import('node:http').IncomingMessage} req
+ * @param {import('../http/router.js').Context} ctx
+ * @param {import('../auth/session.js').Session} session
+ * @param {import('../auth/session.js').RoleOption} chosen
+ */
+async function switchRole(req, ctx, session, chosen) {
   const { cookie } = await withTransaction(async (tx) => {
     await revokeSession(session.sessionId, { session: tx });
     const created = await createSession(
@@ -185,7 +282,19 @@ async function selectRole(req, res, ctx) {
     );
     return created;
   });
-  sendJson(res, 200, profile(session, roles, chosen.roleAssignmentId), { 'Set-Cookie': cookie });
+  return cookie;
+}
+
+/** @type {import('../http/router.js').Handler} */
+async function selectRole(req, res, ctx) {
+  const session = /** @type {import('../auth/session.js').Session} */ (ctx.session);
+  const body = await readJson(req);
+  const roleAssignmentId = stringField(body, 'roleAssignmentId', { max: 64 });
+  const roles = await activeRoles(session.userId);
+  const chosen = roles.find((option) => option.roleAssignmentId === roleAssignmentId);
+  if (!chosen) throw new HttpError(403, 'ROLE_NOT_AVAILABLE', 'This role is not available');
+  const cookie = await switchRole(req, ctx, session, chosen);
+  sendJson(res, 200, profile(session, roles, chosen.roleAssignmentId, await hasActivePartnerProfile(session.userId)), { 'Set-Cookie': cookie });
 }
 
 const invalidInvitation = () =>
@@ -319,7 +428,11 @@ async function confirmPasswordReset(req, res, ctx) {
     const userId = found.user._id;
     const now = new Date();
     const users = await collection('users');
-    await users.updateOne({ _id: userId }, { $set: { passwordHash, passwordChangedAt: now, updatedAt: now } }, { session });
+    await users.updateOne(
+      { _id: userId },
+      { $set: { passwordHash, passwordChangedAt: now, updatedAt: now }, $unset: { mustChangePassword: '', tempPasswordExpiresAt: '' } },
+      { session },
+    );
     const resets = await collection('passwordResets');
     await resets.updateMany({ userId, usedAt: null, revokedAt: null }, { $set: { revokedAt: now } }, { session });
     await revokeUserSessions(userId, { session });
@@ -342,7 +455,8 @@ async function confirmPasswordReset(req, res, ctx) {
 export const authRoutes = [
   { method: 'POST', path: '/api/v1/auth/login', handler: login },
   { method: 'POST', path: '/api/v1/auth/logout', handler: logout },
-  { method: 'GET', path: '/api/v1/auth/me', handler: authed(me, { allowNoRole: true }) },
+  { method: 'GET', path: '/api/v1/auth/me', handler: authed(me, { allowNoRole: true, allowPasswordChange: true }) },
+  { method: 'POST', path: '/api/v1/auth/password/change', handler: authed(changePassword, { allowNoRole: true, allowPasswordChange: true }) },
   { method: 'POST', path: '/api/v1/auth/select-role', handler: authed(selectRole, { allowNoRole: true }) },
   { method: 'POST', path: '/api/v1/auth/invitations/inspect', handler: inspectInvitation },
   { method: 'POST', path: '/api/v1/auth/invitations/accept', handler: acceptInvitation },

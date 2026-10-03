@@ -46,7 +46,9 @@ describe('@permission sign-in', () => {
 
   it('never exposes the password hash', async () => {
     const res = await agent().login('admin@number160.local');
-    assert.doesNotMatch(JSON.stringify(res.body), /scrypt|password/i);
+    const { mustChangePassword, ...rest } = res.body;
+    assert.equal(mustChangePassword, false);
+    assert.doesNotMatch(JSON.stringify(rest), /scrypt|password/i);
   });
 
   it('requires a session for protected routes', async () => {

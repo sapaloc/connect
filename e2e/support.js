@@ -48,6 +48,20 @@ export async function newContext(browser, { account, lang } = {}) {
 }
 
 /**
+ * Signs in from /login (the Sign in form, next to Register).
+ * @param {import('@playwright/test').Page} page
+ * @param {string} email
+ * @param {string} password
+ */
+export async function signIn(page, email, password) {
+  await page.goto('/login');
+  const form = page.locator('#sign-in');
+  await form.getByLabel('Email').fill(email);
+  await form.getByLabel('Password', { exact: true }).fill(password);
+  await form.getByRole('button', { name: 'Sign in' }).click();
+}
+
+/**
  * @param {import('@playwright/test').Browser} browser
  * @param {AccountName} account
  * @param {string} path

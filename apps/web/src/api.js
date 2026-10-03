@@ -79,11 +79,13 @@ export async function apiFile(path) {
  * @typedef {{ roleAssignmentId: string, role: string, scopeType: string, tenantId: string | null, tenantName: string | null }} RoleOption
  * @typedef {{
  *   user: { id: string, email: string, displayName: string, preferredLanguage: 'en' | 'vi' },
+ *   mustChangePassword: boolean,
  *   activeRole: RoleOption | null,
  *   roles: RoleOption[],
  *   permissions: string[],
  *   landing: string | null,
  *   needsRoleSelection: boolean,
+ *   partnerProfile: boolean,
  * }} Profile
  */
 

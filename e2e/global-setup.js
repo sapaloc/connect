@@ -10,11 +10,12 @@ export default async function globalSetup() {
   useTestEnv();
   if (process.env.APP_ENV !== 'test') throw new Error('E2E tests need APP_ENV=test (see .env.test)');
   const { PASSWORD, resetDatabase } = await import('../apps/api/test/helpers.js');
-  const { seedPartners } = await import('../apps/api/src/db/seed-local.js');
+  const { seedPartnerProfiles, seedPartners } = await import('../apps/api/src/db/seed-local.js');
   const { closeClient } = await import('../apps/api/src/db/mongo.js');
   try {
     await resetDatabase();
     await seedPartners(PASSWORD);
+    await seedPartnerProfiles();
   } finally {
     await closeClient();
   }
