@@ -3,14 +3,14 @@ import './styles.css';
 import { PARTNER_WELCOME_PATH } from '#domain';
 import { api, fetchProfile, SESSION_ENDED } from './api.js';
 import { errorText, getLang, setLang, t } from './i18n.js';
-import { canOpen, navItem } from './nav.js';
+import { canOpen, FIND_MERCHANTS_PATH, navItem } from './nav.js';
 import { applyTheme, toggleTheme } from './theme.js';
 import { stopScanner } from './scanner.js';
 import { changePasswordView, forgotView, inviteView, loginView, registerView, resetView, selectRoleView } from './views/auth.js';
 import { homeView } from './views/home.js';
 import { partnerWelcomeView } from './views/partner-welcome.js';
 import { showMessage, togglePasswordReveal } from './views/common.js';
-import { brandView, consoleView, counterView, merchantsView, myView, partnersView, teamView, vouchersView } from './views/shell.js';
+import { brandView, consoleView, counterView, findMerchantsView, merchantsView, myView, partnersView, teamView, vouchersView } from './views/shell.js';
 import { referralPublicView } from './views/referral-public.js';
 import { voucherPublicView } from './views/voucher-public.js';
 
@@ -46,6 +46,7 @@ const PAGE_ROUTES = {
   '/console/team': teamView,
   '/counter': counterView,
   '/my': myView,
+  [FIND_MERCHANTS_PATH]: findMerchantsView,
 };
 
 /** @type {{ text: string, tone: 'error' | 'success' | 'info' } | null} */
@@ -96,8 +97,9 @@ function route() {
   if (profile.mustChangePassword) {
     return path === '/change-password' ? changePasswordView(app) : app.navigate('/change-password', { replace: true });
   }
-  // Approved partner without a merchant yet: no role, only the welcome page.
+  // Approved partner without a merchant yet: no role, only the welcome page and Find merchants.
   if (!profile.activeRole && profile.roles.length === 0 && profile.partnerProfile) {
+    if (path === FIND_MERCHANTS_PATH) return findMerchantsView(app);
     return path === PARTNER_WELCOME_PATH ? partnerWelcomeView(app) : app.navigate(PARTNER_WELCOME_PATH, { replace: true });
   }
   if (path === '/select-role') return selectRoleView(app);

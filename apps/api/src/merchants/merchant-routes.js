@@ -232,9 +232,36 @@ async function setMerchantStatus(req, res, ctx) {
 /** @type {import('../http/router.js').Handler} */
 async function merchantSettings(_req, res, ctx) {
   const tenants = await collection('tenants');
-  const tenant = await tenants.findOne({ _id: sessionOf(ctx).tenantId }, { projection: { name: 1, logoAssetId: 1, brandColor: 1 } });
+  const tenant = await tenants.findOne({ _id: sessionOf(ctx).tenantId }, { projection: { name: 1, logoAssetId: 1, brandColor: 1, acceptsNewPartners: 1 } });
   if (!tenant) throw new HttpError(404, 'TENANT_NOT_FOUND', 'Merchant not found');
-  sendJson(res, 200, { name: tenant.name, brand: brandView(tenant) });
+  sendJson(res, 200, { name: tenant.name, brand: brandView(tenant), acceptsNewPartners: tenant.acceptsNewPartners === true });
+}
+
+/**
+ * "Accept new partners": when on, partners see the merchant in Find merchants and may ask to join.
+ * Pending requests stay when it is turned off.
+ * @type {import('../http/router.js').Handler}
+ */
+async function setAcceptsNewPartners(req, res, ctx) {
+  const tenantId = /** @type {string} */ (sessionOf(ctx).tenantId);
+  const body = await readJson(req);
+  if (typeof body.acceptsNewPartners !== 'boolean') {
+    throw new HttpError(422, 'VALIDATION', 'acceptsNewPartners must be true or false', { details: { field: 'acceptsNewPartners' } });
+  }
+  const accepts = body.acceptsNewPartners;
+  await withTransaction(async (tx) => {
+    const tenants = await collection('tenants');
+    const tenant = await tenants.findOne({ _id: tenantId }, { session: tx, projection: { acceptsNewPartners: 1 } });
+    if (!tenant) throw new HttpError(404, 'TENANT_NOT_FOUND', 'Merchant not found');
+    const before = tenant.acceptsNewPartners === true;
+    if (before === accepts) return;
+    await tenants.updateOne({ _id: tenantId }, { $set: { acceptsNewPartners: accepts } }, { session: tx });
+    await recordAudit(
+      { ...actorOf(ctx), eventType: 'MERCHANT_ACCEPTS_PARTNERS_CHANGED', entityType: 'tenant', entityId: tenantId, before: { acceptsNewPartners: before }, after: { acceptsNewPartners: accepts } },
+      { session: tx },
+    );
+  });
+  sendJson(res, 200, { acceptsNewPartners: accepts });
 }
 
 /**
@@ -346,6 +373,7 @@ async function setBrandColor(req, res, ctx) {
 export const merchantRoutes = [
   { method: 'GET', path: '/api/v1/merchant/settings', handler: authed(merchantSettings, { permission: 'partner.list' }) },
   { method: 'POST', path: '/api/v1/merchant/brand', handler: authed(setBrandColor, { permission: 'merchant.settings' }) },
+  { method: 'POST', path: '/api/v1/merchant/accept-partners', handler: authed(setAcceptsNewPartners, { permission: 'merchant.settings' }) },
   { method: 'POST', path: '/api/v1/merchant/logo', handler: authed(uploadOwnLogo, { permission: 'merchant.settings' }) },
   { method: 'POST', path: '/api/v1/merchant/logo/remove', handler: authed(removeOwnLogo, { permission: 'merchant.settings' }) },
   { method: 'POST', path: '/api/v1/merchants/:id/logo', handler: authed(uploadMerchantLogo, { permission: 'merchant.manage' }) },

@@ -148,10 +148,21 @@ function rulePayload(form) {
 export function partnersPanel(app) {
   const manage = app.state.profile?.permissions.includes('partner.manage') ?? false;
   const report = app.state.profile?.permissions.includes('commission.report') ?? false;
+  const joins = (app.state.profile?.permissions.includes('partner.join_requests') && Boolean(app.state.profile?.activeRole?.tenantId)) ?? false;
+  const joinSection = `
+    <section class="card-sw" id="join-card" aria-labelledby="join-title" hidden>
+      <h2 class="card-title d-flex align-items-center gap-2" id="join-title">
+        <span>${esc(t('joinTitle'))}</span>
+        <span class="count-badge" id="join-count"></span>
+      </h2>
+      <p class="small text-muted">${esc(t(manage ? 'joinHint' : 'joinHintManager'))}</p>
+      ${messageSlot('join-message')}
+      <div class="application-list mt-3" id="join-rows"></div>
+    </section>`;
   const createSection = `
     <section class="card-sw" id="partner-create-card" hidden>
-      <h2 class="card-title">${esc(t('partnerCreateTitle'))}</h2>
-      <p class="text-muted small mb-3">${esc(t('partnerCreateSubtitle'))}</p>
+      <h2 class="card-title" id="partner-create-title">${esc(t('partnerCreateTitle'))}</h2>
+      <p class="text-muted small mb-3" id="partner-create-subtitle">${esc(t('partnerCreateSubtitle'))}</p>
       <form id="partner-create" class="row g-3" novalidate>
         <div class="col-12 col-md-6">
           <label for="p-name" class="form-label small">${esc(t('partnerName'))}</label>
@@ -194,7 +205,8 @@ export function partnersPanel(app) {
           <label for="p-note" class="form-label small">${optionalLabel(t('note'))}</label>
           <input id="p-note" name="note" class="form-control" maxlength="500" />
         </div>
-        <fieldset class="col-12">
+        <p class="col-12 small mb-0" id="p-join-account" hidden></p>
+        <fieldset class="col-12" id="p-account">
           <legend class="form-label small fw-semibold mb-2">${optionalLabel(t('partnerAccount'))}</legend>
           <div class="row g-3">
             <div class="col-12 col-md-5">
@@ -212,13 +224,14 @@ export function partnersPanel(app) {
           </div>
         </fieldset>
         <div class="col-12 d-flex flex-column flex-md-row gap-2">
-          <button type="submit" class="btn btn-primary">${esc(t('partnerCreate'))}</button>
+          <button type="submit" class="btn btn-primary" id="partner-create-submit">${esc(t('partnerCreate'))}</button>
           <button type="button" class="btn btn-outline-secondary" data-create-close>${esc(t('cancel'))}</button>
         </div>
       </form>
       ${messageSlot('partner-create-message')}
     </section>`;
   return `
+    ${joins ? joinSection : ''}
     ${report ? reportCard() : ''}
     <section class="card-sw" id="partner-list-card">
       <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
@@ -257,7 +270,7 @@ function showInvitation(message, invitation, name, boxId, slotId) {
  * @param {{ title: string, body: string, submit: string, onReady?: (form: HTMLFormElement) => void,
  *   onSubmit: (form: HTMLFormElement) => Promise<void> }} options
  */
-function formDialog({ title, body, submit, onReady, onSubmit }) {
+export function formDialog({ title, body, submit, onReady, onSubmit }) {
   const dialog = document.createElement('dialog');
   dialog.className = 'vdialog';
   dialog.innerHTML = `
@@ -580,6 +593,47 @@ function partnerCard(p, { manage, settle, history, showMerchant }) {
     </article>`;
 }
 
+/**
+ * @typedef {{ id: string, message: string | null, createdAt: string,
+ *   profile: import('./partner-welcome.js').PartnerProfile }} JoinRequest
+ */
+
+/**
+ * A partner asking to join: its profile and message; approve / reject for the Merchant admin.
+ * @param {JoinRequest} r
+ * @param {boolean} manage
+ */
+function joinCard(r, manage) {
+  const p = r.profile;
+  const facts = /** @type {Array<[string, string | null]>} */ ([
+    [t('contactName'), p.relationshipKind === 'COMPANY' ? p.contactName : null],
+    [t('email'), p.email],
+    [t('contactPhone'), p.phone],
+    [t('partnerNote'), p.note],
+  ])
+    .filter(([, value]) => value)
+    .map(([label, value]) => `<dt>${esc(label)}</dt><dd>${esc(value)}</dd>`)
+    .join('');
+  return `
+    <article class="application join-card" data-join="${esc(r.id)}">
+      <div class="application-main">
+        <h3 class="h6 mb-1">${esc(p.name)}</h3>
+        <p class="small text-muted mb-0">${esc(t(`ptype_${p.partnerType}`))} · ${esc(t(`kind_${p.relationshipKind}`))}</p>
+        <dl class="profile-facts">${facts}</dl>
+        ${r.message ? `<p class="join-message small">${esc(t('joinMessage', { message: r.message }))}</p>` : ''}
+        <p class="small text-muted mb-0">${esc(t('joinRequestedAt', { date: formatDateTime(r.createdAt) }))}</p>
+      </div>
+      ${
+        manage
+          ? `<div class="application-actions">
+              <button type="button" class="btn btn-sm btn-primary" data-join-approve="${esc(r.id)}">${esc(t('approve'))}</button>
+              <button type="button" class="btn btn-sm btn-outline-secondary" data-join-reject="${esc(r.id)}">${esc(t('reject'))}</button>
+            </div>`
+          : ''
+      }
+    </article>`;
+}
+
 /** @param {App} app */
 export function mountPartners(app) {
   const profile = /** @type {import('../api.js').Profile} */ (app.state.profile);
@@ -590,6 +644,24 @@ export function mountPartners(app) {
   const showMerchant = !profile.activeRole?.tenantId;
   /** @type {Partner[]} */
   let partners = [];
+  /** @type {JoinRequest[]} */
+  let joinRequests = [];
+  /** The join request being approved with the add-partner form, if any. @type {JoinRequest | null} */
+  let approving = null;
+
+  const loadJoins = async () => {
+    const card = document.getElementById('join-card');
+    if (!card) return;
+    try {
+      joinRequests = (await api('GET', '/api/v1/merchant/join-requests')).requests;
+      card.hidden = joinRequests.length === 0;
+      $('#join-count').textContent = String(joinRequests.length);
+      $('#join-rows').innerHTML = joinRequests.map((r) => joinCard(r, manage)).join('');
+    } catch (error) {
+      card.hidden = false;
+      showMessage(errorText(error), 'error', 'join-message');
+    }
+  };
 
   const renderRows = () => {
     $('#partner-rows').innerHTML = partners.length
@@ -639,14 +711,54 @@ export function mountPartners(app) {
   }
 
   if (manage) {
-    $('#partner-create-open').addEventListener('click', () => setCreateOpen(true));
+    const createForm = /** @type {HTMLFormElement} */ ($('#partner-create'));
+    const kindOf = () => formValues(createForm).relationshipKind || 'COMPANY';
+
+    const resetCreateForm = () => {
+      createForm.reset();
+      $('#p-kind-hint').textContent = t('kindHint_COMPANY');
+      createForm.dispatchEvent(new Event('input'));
+    };
+
+    /**
+     * Approving a join request reuses the add-partner form: prefilled from the profile, without the
+     * account fields (the role goes to the requester's own account).
+     * @param {JoinRequest | null} request
+     */
+    const setApproving = (request) => {
+      approving = request;
+      resetCreateForm();
+      $('#partner-create-title').textContent = request ? t('joinApproveTitle', { name: request.profile.name }) : t('partnerCreateTitle');
+      $('#partner-create-subtitle').textContent = t(request ? 'joinApproveSubtitle' : 'partnerCreateSubtitle');
+      $('#partner-create-submit').textContent = request ? t('joinApproveSubmit') : t('partnerCreate');
+      $('#p-account').hidden = Boolean(request);
+      const accountLine = $('#p-join-account');
+      accountLine.hidden = !request;
+      accountLine.textContent = request ? t('joinAccountLine', { email: request.profile.email }) : '';
+      showMessage('', 'info', 'partner-create-message');
+      if (!request) return;
+      const p = request.profile;
+      const field = (/** @type {string} */ name) => /** @type {HTMLInputElement} */ (createForm.elements.namedItem(name));
+      field('name').value = p.name;
+      field('partnerType').value = p.partnerType;
+      /** @type {HTMLInputElement} */ ($(`#p-kind-${p.relationshipKind}`, createForm)).checked = true;
+      $('#p-kind-hint').textContent = t(`kindHint_${p.relationshipKind}`);
+      field('contactName').value = p.contactName ?? (p.relationshipKind === 'COMPANY' ? '' : p.name);
+      field('contactPhone').value = p.phone ?? '';
+      field('contactEmail').value = p.email;
+      createForm.dispatchEvent(new Event('input'));
+    };
+
+    $('#partner-create-open').addEventListener('click', () => {
+      if (approving) setApproving(null);
+      setCreateOpen(true);
+    });
     $('[data-create-close]').addEventListener('click', () => {
+      if (approving) setApproving(null);
       setCreateOpen(false);
       $('#partner-list-card').scrollIntoView({ behavior: 'smooth', block: 'start' });
     });
 
-    const createForm = /** @type {HTMLFormElement} */ ($('#partner-create'));
-    const kindOf = () => formValues(createForm).relationshipKind || 'COMPANY';
     bindRulePreview(createForm, 'p-rule', kindOf);
     createForm.addEventListener('change', (event) => {
       if (/** @type {HTMLInputElement} */ (event.target).name === 'relationshipKind') $('#p-kind-hint').textContent = t(`kindHint_${kindOf()}`);
@@ -658,33 +770,78 @@ export function mountPartners(app) {
         showMessage('', 'info', 'partner-message');
         $('#partner-link').hidden = true;
         const values = formValues(createForm);
-        const withAccount = Boolean(values.accountEmail.trim() || values.accountName.trim());
+        const fields = {
+          name: values.name,
+          relationshipKind: kindOf(),
+          partnerType: values.partnerType,
+          contactName: values.contactName,
+          contactPhone: values.contactPhone,
+          contactEmail: values.contactEmail,
+          note: values.note,
+          rule: rulePayload(createForm),
+        };
         try {
+          if (approving) {
+            const result = await api('POST', `/api/v1/merchant/join-requests/${encodeURIComponent(approving.id)}/approve`, fields);
+            const approved = t('joinApproved', { name: result.partner.name });
+            showMessage(result.emailSent ? approved : `${approved} ${t('joinEmailNotSent')}`, result.emailSent ? 'success' : 'info', 'partner-message');
+            setApproving(null);
+            setCreateOpen(false);
+            await Promise.all([load(), loadJoins()]);
+            $('#partner-list-card').scrollIntoView({ behavior: 'smooth', block: 'start' });
+            return;
+          }
+          const withAccount = Boolean(values.accountEmail.trim() || values.accountName.trim());
           const result = await api('POST', '/api/v1/partners', {
-            name: values.name,
-            relationshipKind: kindOf(),
-            partnerType: values.partnerType,
-            contactName: values.contactName,
-            contactPhone: values.contactPhone,
-            contactEmail: values.contactEmail,
-            note: values.note,
-            rule: rulePayload(createForm),
+            ...fields,
             ...(withAccount
               ? { account: { email: values.accountEmail, displayName: values.accountName, preferredLanguage: values.preferredLanguage } }
               : {}),
           });
           const created = t('partnerCreated', { name: result.partner.name });
-          if (result.invitation) showInvitation(created, result.invitation, values.accountName, 'partner-link', 'partner-message');
+          if (result.invitation?.status === 'ACTIVE') {
+            $('#partner-link').hidden = true;
+            showMessage(`${created} ${t('partnerAccountLinked', { email: values.accountEmail.trim().toLowerCase() })}`, 'success', 'partner-message');
+          } else if (result.invitation) showInvitation(created, result.invitation, values.accountName, 'partner-link', 'partner-message');
           else showMessage(created, 'success', 'partner-message');
-          createForm.reset();
-          $('#p-kind-hint').textContent = t('kindHint_COMPANY');
-          createForm.dispatchEvent(new Event('input'));
+          resetCreateForm();
           setCreateOpen(false);
           await load();
           $('#partner-list-card').scrollIntoView({ behavior: 'smooth', block: 'start' });
         } catch (error) {
           showMessage(errorText(error), 'error', 'partner-create-message');
         }
+      });
+    });
+
+    document.getElementById('join-rows')?.addEventListener('click', (event) => {
+      const target = /** @type {HTMLElement} */ (event.target);
+      const approveId = target.closest('[data-join-approve]')?.getAttribute('data-join-approve');
+      const rejectId = target.closest('[data-join-reject]')?.getAttribute('data-join-reject');
+      const request = joinRequests.find((r) => r.id === (approveId ?? rejectId));
+      if (!request) return;
+      if (approveId) {
+        setApproving(request);
+        setCreateOpen(true);
+        return;
+      }
+      formDialog({
+        title: t('joinRejectTitle', { name: request.profile.name }),
+        body: `
+          <label for="d-join-reason" class="form-label small">${optionalLabel(t('joinRejectReason'))}</label>
+          <textarea id="d-join-reason" name="reason" class="form-control" rows="3" maxlength="500"></textarea>`,
+        submit: t('reject'),
+        onSubmit: async (form) => {
+          const result = await api('POST', `/api/v1/merchant/join-requests/${encodeURIComponent(request.id)}/reject`, { reason: formValues(form).reason });
+          const rejected = t('joinRejected', { name: request.profile.name });
+          const text = result.emailSent ? rejected : `${rejected} ${t('joinEmailNotSent')}`;
+          if (approving?.id === request.id) {
+            setApproving(null);
+            setCreateOpen(false);
+          }
+          await loadJoins();
+          showMessage(text, result.emailSent ? 'success' : 'info', joinRequests.length ? 'join-message' : 'partner-message');
+        },
       });
     });
   }
@@ -804,4 +961,5 @@ export function mountPartners(app) {
   });
 
   load();
+  loadJoins();
 }

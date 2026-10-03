@@ -228,22 +228,32 @@ async function logout(req, res, ctx) {
   sendJson(res, 200, { ok: true }, { 'Set-Cookie': clearSessionCookie() });
 }
 
-/** @type {import('../http/router.js').Handler} */
-async function me(_req, res, ctx) {
+/**
+ * A session without a role whose account now has exactly one (a partner just added by a merchant, or
+ * whose other roles ended) switches to it, as sign-in would.
+ * @type {import('../http/router.js').Handler}
+ */
+async function me(req, res, ctx) {
   const session = /** @type {import('../auth/session.js').Session} */ (ctx.session);
+  if (!session.roleAssignmentId) {
+    const roles = await activeRoles(session.userId);
+    if (roles.length === 1) {
+      const cookie = await switchRole(req, ctx, session, roles[0]);
+      const partnerProfile = await hasActivePartnerProfile(session.userId);
+      return sendJson(res, 200, profile(session, roles, roles[0].roleAssignmentId, partnerProfile), { 'Set-Cookie': cookie });
+    }
+  }
   sendJson(res, 200, await currentProfile(session, session.roleAssignmentId));
 }
 
-/** @type {import('../http/router.js').Handler} */
-async function selectRole(req, res, ctx) {
-  const session = /** @type {import('../auth/session.js').Session} */ (ctx.session);
-  const body = await readJson(req);
-  const roleAssignmentId = stringField(body, 'roleAssignmentId', { max: 64 });
-  const roles = await activeRoles(session.userId);
-  const chosen = roles.find((option) => option.roleAssignmentId === roleAssignmentId);
-  if (!chosen) throw new HttpError(403, 'ROLE_NOT_AVAILABLE', 'This role is not available');
-
-  // New session ID on every role change (§8.1).
+/**
+ * Replaces the session with one on `chosen`: a new session ID on every role change (§8.1).
+ * @param {import('node:http').IncomingMessage} req
+ * @param {import('../http/router.js').Context} ctx
+ * @param {import('../auth/session.js').Session} session
+ * @param {import('../auth/session.js').RoleOption} chosen
+ */
+async function switchRole(req, ctx, session, chosen) {
   const { cookie } = await withTransaction(async (tx) => {
     await revokeSession(session.sessionId, { session: tx });
     const created = await createSession(
@@ -272,6 +282,18 @@ async function selectRole(req, res, ctx) {
     );
     return created;
   });
+  return cookie;
+}
+
+/** @type {import('../http/router.js').Handler} */
+async function selectRole(req, res, ctx) {
+  const session = /** @type {import('../auth/session.js').Session} */ (ctx.session);
+  const body = await readJson(req);
+  const roleAssignmentId = stringField(body, 'roleAssignmentId', { max: 64 });
+  const roles = await activeRoles(session.userId);
+  const chosen = roles.find((option) => option.roleAssignmentId === roleAssignmentId);
+  if (!chosen) throw new HttpError(403, 'ROLE_NOT_AVAILABLE', 'This role is not available');
+  const cookie = await switchRole(req, ctx, session, chosen);
   sendJson(res, 200, profile(session, roles, chosen.roleAssignmentId, await hasActivePartnerProfile(session.userId)), { 'Set-Cookie': cookie });
 }
 

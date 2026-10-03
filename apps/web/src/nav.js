@@ -1,3 +1,6 @@
+/** Find merchants: in MyConnect for a partner with merchants, on its own for one without (main.js). */
+export const FIND_MERCHANTS_PATH = '/my/merchants';
+
 /**
  * Pages reachable from the navigation. A page shows only when the active role holds
  * `surface.<surface>` and, when set, `permission` (permission by absence, §18.1).
@@ -8,6 +11,7 @@
  *   icon: IconName,
  *   permission?: string,
  *   tenantScoped?: boolean,
+ *   partnerProfile?: boolean,
  * }} NavItem
  */
 
@@ -21,6 +25,7 @@ export const NAV = [
   { path: '/console/team', surface: 'console', label: 'nav_team', icon: 'team', permission: 'user.list', tenantScoped: true },
   { path: '/counter', surface: 'counter', label: 'nav_counter', icon: 'scan' },
   { path: '/my', surface: 'my', label: 'nav_my', icon: 'qr' },
+  { path: FIND_MERCHANTS_PATH, surface: 'my', label: 'nav_findMerchants', icon: 'store', partnerProfile: true },
 ];
 
 /**
@@ -31,6 +36,7 @@ export function canOpen(profile, item) {
   if (!profile.permissions.includes(`surface.${item.surface}`)) return false;
   if (item.permission && !profile.permissions.includes(item.permission)) return false;
   if (item.tenantScoped && !profile.activeRole?.tenantId) return false;
+  if (item.partnerProfile && !profile.partnerProfile) return false;
   return true;
 }
 

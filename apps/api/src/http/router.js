@@ -7,6 +7,7 @@ import { dashboardRoutes } from '../merchants/dashboard.js';
 import { merchantRoutes } from '../merchants/merchant-routes.js';
 import { partnerApplicationRoutes } from '../partners/application-routes.js';
 import { historyRoutes } from '../partners/history.js';
+import { joinRoutes } from '../partners/join-routes.js';
 import { myRoutes } from '../partners/my-routes.js';
 import { partnerRoutes } from '../partners/partner-routes.js';
 import { partnerProfileRoutes } from '../partners/profile-routes.js';
@@ -31,6 +32,7 @@ const definitions = [
   ...applicationRoutes,
   ...partnerApplicationRoutes,
   ...partnerProfileRoutes,
+  ...joinRoutes,
   ...partnerRoutes,
   ...referralRoutes,
   ...myRoutes,

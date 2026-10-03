@@ -24,6 +24,7 @@ const EXPECTED = {
     'merchant.settings',
     'partner.list',
     'partner.manage',
+    'partner.join_requests',
     'commercial_rule.manage',
     'voucher.issue',
     'voucher.list',
@@ -37,6 +38,7 @@ const EXPECTED = {
     'surface.console',
     'surface.counter',
     'partner.list',
+    'partner.join_requests',
     'voucher.issue',
     'voucher.list',
     'voucher.void',
@@ -109,6 +111,13 @@ describe('roleConflict: one side per person', () => {
   it('a partner may work with many merchants', () => {
     assert.equal(roleConflict([{ role: ROLES.PARTNER_ADMIN, tenantId: A }], { role: ROLES.PARTNER_ADMIN, tenantId: B }), null);
     assert.equal(roleConflict([{ role: ROLES.REFERRER, tenantId: A }], { role: ROLES.PARTNER_ADMIN, tenantId: B }), null);
+  });
+
+  it('a partner works with each merchant through one partner record', () => {
+    const held = [{ role: ROLES.REFERRER, tenantId: A, partnerRelationshipId: 'p1' }];
+    assert.equal(roleConflict(held, { role: ROLES.REFERRER, tenantId: A, partnerRelationshipId: 'p2' }), 'PARTNER_ALREADY_IN_MERCHANT');
+    assert.equal(roleConflict(held, { role: ROLES.PARTNER_ADMIN, tenantId: A, partnerRelationshipId: 'p2' }), 'PARTNER_ALREADY_IN_MERCHANT');
+    assert.equal(roleConflict(held, { role: ROLES.REFERRER, tenantId: A, partnerRelationshipId: 'p1' }), null);
   });
 
   it('never mixes merchant team, partner and platform roles', () => {

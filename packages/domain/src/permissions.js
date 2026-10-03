@@ -17,6 +17,7 @@ export const PERMISSIONS = Object.freeze({
   'merchant.settings': Object.freeze([TENANT_ADMIN]),
   'partner.list': Object.freeze([PLATFORM_ADMIN, TENANT_ADMIN, MANAGER]),
   'partner.manage': Object.freeze([TENANT_ADMIN]),
+  'partner.join_requests': Object.freeze([TENANT_ADMIN, MANAGER]),
   'commercial_rule.manage': Object.freeze([TENANT_ADMIN]),
   'voucher.issue': Object.freeze([TENANT_ADMIN, MANAGER]),
   'voucher.list': Object.freeze([PLATFORM_ADMIN, TENANT_ADMIN, MANAGER]),
